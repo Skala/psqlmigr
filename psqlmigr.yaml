@@ -1,0 +1,5 @@
+schema_dir: schema
+migrations_dir: migrations
+tracking_schema: psqlmigr
+tracking_table: schema_migrations
+default_schema: public

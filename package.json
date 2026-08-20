@@ -1,0 +1,154 @@
+{
+  "name": "psqlmigr",
+  "displayName": "PsqlMigr PostgreSQL Schema & Migration Manager",
+  "description": "Declarative PostgreSQL schema versioning, reverse-engineering, diffing, and migration management extension for VS Code & Antigravity.",
+  "version": "0.1.0",
+  "publisher": "psqlmigr",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Database",
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:psqlmigr-schema",
+    "onView:psqlmigr-migrations",
+    "onView:psqlmigr-connection"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "psqlmigr-explorer",
+          "title": "PsqlMigr",
+          "icon": "$(database)"
+        }
+      ]
+    },
+    "views": {
+      "psqlmigr-explorer": [
+        {
+          "id": "psqlmigr-connection",
+          "name": "Database Connection (.env)",
+          "icon": "$(server)"
+        },
+        {
+          "id": "psqlmigr-schema",
+          "name": "Schema Objects Explorer",
+          "icon": "$(symbol-structure)"
+        },
+        {
+          "id": "psqlmigr-migrations",
+          "name": "Migration History & Status",
+          "icon": "$(history)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "psqlmigr.initProject",
+        "title": "PsqlMigr: Initialize Project Structure",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "psqlmigr.configureConnection",
+        "title": "PsqlMigr: Configure Connection & Save .env",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "psqlmigr.testConnection",
+        "title": "PsqlMigr: Test PostgreSQL Connection",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "psqlmigr.pullSchema",
+        "title": "PsqlMigr: Pull Schema from Database",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "psqlmigr.generateMigration",
+        "title": "PsqlMigr: Generate Migration (Plan)",
+        "icon": "$(add)"
+      },
+      {
+        "command": "psqlmigr.validateMigrations",
+        "title": "PsqlMigr: Validate Migrations (Debug Dry-Run)",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "psqlmigr.applyMigrations",
+        "title": "PsqlMigr: Apply Pending Migrations",
+        "icon": "$(play)"
+      },
+      {
+        "command": "psqlmigr.recalculateChecksums",
+        "title": "PsqlMigr: Recalculate SHA256 Checksums",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "psqlmigr.refreshViews",
+        "title": "PsqlMigr: Refresh Explorer Views",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "psqlmigr.configureConnection",
+          "when": "view == psqlmigr-connection",
+          "group": "navigation"
+        },
+        {
+          "command": "psqlmigr.testConnection",
+          "when": "view == psqlmigr-connection",
+          "group": "navigation"
+        },
+        {
+          "command": "psqlmigr.pullSchema",
+          "when": "view == psqlmigr-schema",
+          "group": "navigation"
+        },
+        {
+          "command": "psqlmigr.generateMigration",
+          "when": "view == psqlmigr-migrations",
+          "group": "navigation"
+        },
+        {
+          "command": "psqlmigr.validateMigrations",
+          "when": "view == psqlmigr-migrations",
+          "group": "navigation"
+        },
+        {
+          "command": "psqlmigr.applyMigrations",
+          "when": "view == psqlmigr-migrations",
+          "group": "navigation"
+        },
+        {
+          "command": "psqlmigr.refreshViews",
+          "when": "view == psqlmigr-schema || view == psqlmigr-migrations || view == psqlmigr-connection",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.x",
+    "typescript-eslint": "^8.61.1",
+    "eslint": "^10.5.0",
+    "typescript": "^6.0.3",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0"
+  }
+}

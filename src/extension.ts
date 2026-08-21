@@ -9,7 +9,7 @@ export function activate(context: vscode.ExtensionContext) {
         ? vscode.workspace.workspaceFolders[0].uri.fsPath
         : process.cwd();
 
-    const cliRunner = new PsqlMigrCliRunner(workspaceRoot);
+    const cliRunner = new PsqlMigrCliRunner(workspaceRoot, context.extensionPath);
 
     // Tree View Providers
     const schemaTreeProvider = new SchemaObjectsTreeProvider(workspaceRoot);

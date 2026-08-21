@@ -12,25 +12,43 @@ export interface CliResult<T = any> {
 
 export class PsqlMigrCliRunner {
     private workspaceRoot: string;
+    private extensionPath: string;
 
-    constructor(workspaceRoot?: string) {
-        this.workspaceRoot = workspaceRoot || (vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders[0].uri.fsPath : process.cwd());
+    constructor(workspaceRoot?: string, extensionPath?: string) {
+        this.workspaceRoot = workspaceRoot || (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0 ? vscode.workspace.workspaceFolders[0].uri.fsPath : process.cwd());
+        this.extensionPath = extensionPath || this.workspaceRoot;
     }
 
     private getCliCommand(): string {
-        // Check for local venv python binary first
-        const winVenvCli = path.join(this.workspaceRoot, 'core_engine', '.venv', 'Scripts', 'psqlmigr.exe');
-        const unixVenvCli = path.join(this.workspaceRoot, 'core_engine', '.venv', 'bin', 'psqlmigr');
+        const pathsToTest = [
+            path.join(this.extensionPath, 'core_engine', '.venv', 'Scripts', 'psqlmigr.exe'),
+            path.join(this.workspaceRoot, 'core_engine', '.venv', 'Scripts', 'psqlmigr.exe'),
+            path.join(this.extensionPath, 'core_engine', '.venv', 'bin', 'psqlmigr'),
+            path.join(this.workspaceRoot, 'core_engine', '.venv', 'bin', 'psqlmigr'),
+        ];
 
-        if (fs.existsSync(winVenvCli)) {
-            return `"${winVenvCli}"`;
-        }
-        if (fs.existsSync(unixVenvCli)) {
-            return `"${unixVenvCli}"`;
+        for (const p of pathsToTest) {
+            if (fs.existsSync(p)) {
+                return `"${p}"`;
+            }
         }
 
-        // Fallback to global psqlmigr executable or python module
-        return 'psqlmigr';
+        const winPy = path.join(this.extensionPath, 'core_engine', '.venv', 'Scripts', 'python.exe');
+        const unixPy = path.join(this.extensionPath, 'core_engine', '.venv', 'bin', 'python');
+        const cliPy = path.join(this.extensionPath, 'core_engine', 'psqlmigr', 'cli.py');
+
+        if (fs.existsSync(winPy) && fs.existsSync(cliPy)) {
+            return `"${winPy}" "${cliPy}"`;
+        }
+        if (fs.existsSync(unixPy) && fs.existsSync(cliPy)) {
+            return `"${unixPy}" "${cliPy}"`;
+        }
+
+        if (fs.existsSync(cliPy)) {
+            return `python "${cliPy}"`;
+        }
+
+        return 'python -m psqlmigr.cli';
     }
 
     public async execute<T = any>(args: string[]): Promise<CliResult<T>> {

@@ -47,3 +47,25 @@ def test_special_character_password_connection_url(tmp_path: Path, monkeypatch):
     assert parsed["password"] == "P@ssw#rd!"
     assert parsed["user"] == "postgres"
     assert parsed["dbname"] == "test_db"
+
+def test_dumper_routing(tmp_path: Path):
+    from psqlmigr.dumper import SchemaDumper
+    from unittest.mock import MagicMock
+
+    dumper = SchemaDumper("postgresql://postgres:postgres@localhost:5432/test", tmp_path)
+    dumper.inspector.get_user_schemas = MagicMock(return_value=["public"])
+    dumper.inspector.inspect_tables = MagicMock(return_value=[])
+    dumper.inspector.inspect_views = MagicMock(return_value=[])
+    dumper.inspector.inspect_functions_and_procedures = MagicMock(return_value=[
+        {"name": "my_func", "definition": "CREATE FUNCTION my_func() RETURNS void AS $$ $$ LANGUAGE plpgsql", "language": "plpgsql", "kind": "f"},
+        {"name": "my_proc", "definition": "CREATE PROCEDURE my_proc() AS $$ $$ LANGUAGE plpgsql", "language": "plpgsql", "kind": "p"}
+    ])
+    dumper.inspector.inspect_indexes = MagicMock(return_value=[
+        {"name": "idx_users_email", "table_name": "users", "definition": "CREATE INDEX idx_users_email ON public.users (email)"}
+    ])
+
+    written = dumper.dump_schema()
+    
+    assert (tmp_path / "public" / "functions" / "my_func.sql").exists()
+    assert (tmp_path / "public" / "procedures" / "my_proc.sql").exists()
+    assert (tmp_path / "public" / "indexes" / "idx_users_email.sql").exists()

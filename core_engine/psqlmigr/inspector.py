@@ -33,7 +33,6 @@ class PostgresInspector:
                 table_names = [row[0] for row in cur.fetchall()]
 
                 for tname in table_names:
-                    # Get table DDL using pg_dump logic or construct clean CREATE TABLE DDL statement
                     columns = self._get_table_columns(cur, schema_name, tname)
                     pk_cols = self._get_primary_key(cur, schema_name, tname)
                     fk_constraints = self._get_foreign_keys(cur, schema_name, tname)
@@ -152,27 +151,55 @@ class PostgresInspector:
                     })
         return views
 
-    def inspect_functions(self, schema_name: str) -> List[Dict[str, Any]]:
+    def inspect_functions_and_procedures(self, schema_name: str) -> List[Dict[str, Any]]:
         query = """
             SELECT 
                 p.proname AS name,
                 pg_get_functiondef(p.oid) AS definition,
-                l.lanname AS language
+                l.lanname AS language,
+                p.prokind AS kind
             FROM pg_proc p
             JOIN pg_namespace n ON n.oid = p.pronamespace
             JOIN pg_language l ON l.oid = p.prolang
             WHERE n.nspname = %s
-              AND p.prokind IN ('f', 'p')
+              AND p.prokind IN ('f', 'p', 'a', 'w')
             ORDER BY p.proname;
         """
-        funcs = []
+        routines = []
         with psycopg.connect(self.db_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(query, (schema_name,))
-                for name, fdef, lang in cur.fetchall():
-                    funcs.append({
+                for name, fdef, lang, kind in cur.fetchall():
+                    routines.append({
                         "name": name,
                         "definition": fdef.strip(),
-                        "language": lang
+                        "language": lang,
+                        "kind": kind  # 'p' for procedure, 'f'/'a'/'w' for function
                     })
-        return funcs
+        return routines
+
+    def inspect_indexes(self, schema_name: str) -> List[Dict[str, Any]]:
+        query = """
+            SELECT
+                i.relname AS index_name,
+                t.relname AS table_name,
+                pg_get_indexdef(idx.indexrelid) AS index_def
+            FROM pg_index idx
+            JOIN pg_class i ON i.oid = idx.indexrelid
+            JOIN pg_class t ON t.oid = idx.indrelid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            WHERE n.nspname = %s
+              AND NOT idx.indisprimary
+            ORDER BY i.relname;
+        """
+        indexes = []
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (schema_name,))
+                for iname, tname, idef in cur.fetchall():
+                    indexes.append({
+                        "name": iname,
+                        "table_name": tname,
+                        "definition": idef.strip()
+                    })
+        return indexes

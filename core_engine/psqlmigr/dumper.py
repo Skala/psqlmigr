@@ -17,7 +17,7 @@ class SchemaDumper:
         for sname in schemas:
             schema_dir = self.output_dir / sname
             
-            # Dump Tables
+            # 1. Dump Tables
             tables = self.inspector.inspect_tables(sname)
             if tables:
                 tables_dir = schema_dir / "tables"
@@ -28,7 +28,7 @@ class SchemaDumper:
                     file_path.write_text(ddl, encoding="utf-8")
                     written_files.append(file_path)
 
-            # Dump Views
+            # 2. Dump Views
             views = self.inspector.inspect_views(sname)
             if views:
                 views_dir = schema_dir / "views"
@@ -39,14 +39,32 @@ class SchemaDumper:
                     file_path.write_text(ddl, encoding="utf-8")
                     written_files.append(file_path)
 
-            # Dump Functions / Procedures
-            funcs = self.inspector.inspect_functions(sname)
-            if funcs:
+            # 3. Dump Functions vs Procedures
+            routines = self.inspector.inspect_functions_and_procedures(sname)
+            if routines:
                 funcs_dir = schema_dir / "functions"
-                funcs_dir.mkdir(parents=True, exist_ok=True)
-                for fn in funcs:
-                    file_path = funcs_dir / f"{fn['name']}.sql"
-                    ddl = f"{fn['definition']};\n"
+                procs_dir = schema_dir / "procedures"
+
+                for r in routines:
+                    if r["kind"] == "p":
+                        procs_dir.mkdir(parents=True, exist_ok=True)
+                        file_path = procs_dir / f"{r['name']}.sql"
+                    else:
+                        funcs_dir.mkdir(parents=True, exist_ok=True)
+                        file_path = funcs_dir / f"{r['name']}.sql"
+
+                    ddl = f"{r['definition']};\n"
+                    file_path.write_text(ddl, encoding="utf-8")
+                    written_files.append(file_path)
+
+            # 4. Dump Indexes
+            indexes = self.inspector.inspect_indexes(sname)
+            if indexes:
+                indexes_dir = schema_dir / "indexes"
+                indexes_dir.mkdir(parents=True, exist_ok=True)
+                for idx in indexes:
+                    file_path = indexes_dir / f"{idx['name']}.sql"
+                    ddl = f"{idx['definition']};\n"
                     file_path.write_text(ddl, encoding="utf-8")
                     written_files.append(file_path)
 

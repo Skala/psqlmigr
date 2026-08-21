@@ -95,11 +95,11 @@ export class PsqlMigrCliRunner {
         if (params.url) {
             args.push('--url', `"${params.url}"`);
         } else {
-            if (params.host) args.push('--host', `"${params.host}"`);
-            if (params.port) args.push('--port', `"${params.port}"`);
-            if (params.user) args.push('--user', `"${params.user}"`);
-            if (params.password) args.push('--password', `"${params.password}"`);
-            if (params.database) args.push('--database', `"${params.database}"`);
+            if (params.host) { args.push('--host', `"${params.host}"`); }
+            if (params.port) { args.push('--port', `"${params.port}"`); }
+            if (params.user) { args.push('--user', `"${params.user}"`); }
+            if (params.password) { args.push('--password', `"${params.password}"`); }
+            if (params.database) { args.push('--database', `"${params.database}"`); }
         }
         return this.execute(args);
     }

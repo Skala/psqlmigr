@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext) {
     const cliRunner = new PsqlMigrCliRunner(workspaceRoot, context.extensionPath);
 
     // Tree View Providers
-    const schemaTreeProvider = new SchemaObjectsTreeProvider(workspaceRoot);
+    const schemaTreeProvider = new SchemaObjectsTreeProvider(workspaceRoot, cliRunner);
     const migrationTreeProvider = new MigrationHistoryTreeProvider(workspaceRoot, cliRunner);
     const connectionTreeProvider = new ConnectionTreeProvider(workspaceRoot, cliRunner);
 
@@ -42,19 +42,29 @@ export function activate(context: vscode.ExtensionContext) {
     // 2. Configure Connection & Save to .env
     const configConnCmd = vscode.commands.registerCommand('psqlmigr.configureConnection', async () => {
         const host = await vscode.window.showInputBox({ prompt: 'PostgreSQL Host', value: 'localhost' });
-        if (!host) return;
+        if (!host) {
+            return;
+        }
 
         const port = await vscode.window.showInputBox({ prompt: 'PostgreSQL Port', value: '5432' });
-        if (!port) return;
+        if (!port) {
+            return;
+        }
 
         const user = await vscode.window.showInputBox({ prompt: 'PostgreSQL User', value: 'postgres' });
-        if (!user) return;
+        if (!user) {
+            return;
+        }
 
         const password = await vscode.window.showInputBox({ prompt: 'PostgreSQL Password', password: true });
-        if (password === undefined) return;
+        if (password === undefined) {
+            return;
+        }
 
         const database = await vscode.window.showInputBox({ prompt: 'PostgreSQL Database Name' });
-        if (!database) return;
+        if (!database) {
+            return;
+        }
 
         const saveRes = await cliRunner.setEnv({ host, port, user, password, database });
         if (!saveRes.success) {
@@ -105,7 +115,9 @@ export function activate(context: vscode.ExtensionContext) {
             prompt: 'Enter migration description (e.g. create_users_table)',
             placeHolder: 'create_users_table'
         });
-        if (!name) return;
+        if (!name) {
+            return;
+        }
 
         const res = await cliRunner.planMigration(name);
         if (res.success) {
@@ -137,7 +149,9 @@ export function activate(context: vscode.ExtensionContext) {
             { modal: true },
             'Apply Migrations'
         );
-        if (confirm !== 'Apply Migrations') return;
+        if (confirm !== 'Apply Migrations') {
+            return;
+        }
 
         const res = await cliRunner.applyMigrations();
         if (res.success) {

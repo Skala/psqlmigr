@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { PsqlMigrCliRunner } from '../cliRunner';
 
 export class SchemaItem extends vscode.TreeItem {
     constructor(
@@ -31,7 +32,10 @@ export class SchemaObjectsTreeProvider implements vscode.TreeDataProvider<Schema
     private _onDidChangeTreeData: vscode.EventEmitter<SchemaItem | undefined | null | void> = new vscode.EventEmitter<SchemaItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<SchemaItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
-    constructor(private workspaceRoot: string) {}
+    constructor(
+        private workspaceRoot: string,
+        private cliRunner?: PsqlMigrCliRunner
+    ) {}
 
     refresh(): void {
         this._onDidChangeTreeData.fire();

@@ -54,7 +54,9 @@ def test_dumper_routing(tmp_path: Path):
 
     dumper = SchemaDumper("postgresql://postgres:postgres@localhost:5432/test", tmp_path)
     dumper.inspector.get_user_schemas = MagicMock(return_value=["public"])
-    dumper.inspector.inspect_tables = MagicMock(return_value=[])
+    dumper.inspector.inspect_tables = MagicMock(return_value=[
+        {"name": "users", "relkind": "r", "is_partition": False, "partition_by": None, "partition_bound": None, "parent_table": None, "columns": [{"name": "id", "type": "INT", "nullable": False, "default": None}], "primary_key": ["id"], "foreign_keys": [], "unique_constraints": []}
+    ])
     dumper.inspector.inspect_views = MagicMock(return_value=[])
     dumper.inspector.inspect_functions_and_procedures = MagicMock(return_value=[
         {"name": "my_func", "definition": "CREATE FUNCTION my_func() RETURNS void AS $$ $$ LANGUAGE plpgsql", "language": "plpgsql", "kind": "f"},
@@ -68,7 +70,10 @@ def test_dumper_routing(tmp_path: Path):
     
     assert (tmp_path / "public" / "functions" / "my_func.sql").exists()
     assert (tmp_path / "public" / "procedures" / "my_proc.sql").exists()
-    assert (tmp_path / "public" / "indexes" / "idx_users_email.sql").exists()
+    
+    users_sql = (tmp_path / "public" / "tables" / "users.sql").read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS public.users" in users_sql
+    assert "CREATE INDEX idx_users_email ON public.users (email);" in users_sql
 
 def test_partitioned_table_dumper(tmp_path: Path):
     from psqlmigr.dumper import SchemaDumper
@@ -104,13 +109,14 @@ def test_partitioned_table_dumper(tmp_path: Path):
     ])
     dumper.inspector.inspect_views = MagicMock(return_value=[])
     dumper.inspector.inspect_functions_and_procedures = MagicMock(return_value=[])
-    dumper.inspector.inspect_indexes = MagicMock(return_value=[])
+    dumper.inspector.inspect_indexes = MagicMock(return_value=[
+        {"name": "idx_measurement_logdate", "table_name": "measurement", "definition": "CREATE INDEX idx_measurement_logdate ON transform.measurement (logdate)"}
+    ])
 
     written = dumper.dump_schema()
 
     master_sql = (tmp_path / "transform" / "tables" / "measurement.sql").read_text(encoding="utf-8")
     assert "PARTITION BY RANGE (logdate);" in master_sql
-
-    child_sql = (tmp_path / "transform" / "tables" / "measurement_y2026m01.sql").read_text(encoding="utf-8")
-    assert "CREATE TABLE IF NOT EXISTS transform.measurement_y2026m01 PARTITION OF transform.measurement" in child_sql
-    assert "FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');" in child_sql
+    assert "CREATE TABLE IF NOT EXISTS transform.measurement_y2026m01 PARTITION OF transform.measurement" in master_sql
+    assert "FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');" in master_sql
+    assert "CREATE INDEX idx_measurement_logdate ON transform.measurement (logdate);" in master_sql

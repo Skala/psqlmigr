@@ -17,19 +17,90 @@ class SchemaDumper:
         for sname in schemas:
             schema_dir = self.output_dir / sname
             
-            # 1. Dump Tables (regular, partitioned master, child partitions)
             tables = self.inspector.inspect_tables(sname)
-            if tables:
+            views = self.inspector.inspect_views(sname)
+            routines = self.inspector.inspect_functions_and_procedures(sname)
+            indexes = self.inspector.inspect_indexes(sname)
+
+            # Map child partitions to parent table
+            parent_to_children: Dict[str, List[Dict[str, Any]]] = {}
+            main_tables: List[Dict[str, Any]] = []
+            child_tables: List[Dict[str, Any]] = []
+
+            for tbl in tables:
+                if tbl.get("is_partition") and tbl.get("parent_table"):
+                    parent_to_children.setdefault(tbl["parent_table"], []).append(tbl)
+                    child_tables.append(tbl)
+                else:
+                    main_tables.append(tbl)
+
+            # Map indexes to table name
+            table_indexes: Dict[str, List[Dict[str, Any]]] = {}
+            standalone_indexes: List[Dict[str, Any]] = []
+
+            all_table_names = {t["name"] for t in tables}
+
+            for idx in indexes:
+                tname = idx.get("table_name")
+                if tname in all_table_names:
+                    table_indexes.setdefault(tname, []).append(idx)
+                else:
+                    standalone_indexes.append(idx)
+
+            # 1. Dump Tables (Master Table + Child Partitions + Table Indexes in ONE file)
+            if main_tables or child_tables:
                 tables_dir = schema_dir / "tables"
                 tables_dir.mkdir(parents=True, exist_ok=True)
-                for tbl in tables:
-                    file_path = tables_dir / f"{tbl['name']}.sql"
-                    ddl = self._generate_table_ddl(sname, tbl)
-                    file_path.write_text(ddl, encoding="utf-8")
+
+                processed_child_names = set()
+
+                for tbl in main_tables:
+                    tname = tbl["name"]
+                    file_path = tables_dir / f"{tname}.sql"
+                    
+                    ddl_parts = []
+                    # Base Table DDL
+                    ddl_parts.append(self._generate_table_ddl(sname, tbl))
+
+                    # Child Partitions (if any)
+                    children = parent_to_children.get(tname, [])
+                    if children:
+                        ddl_parts.append("-- Partitions")
+                        for child in children:
+                            processed_child_names.add(child["name"])
+                            ddl_parts.append(self._generate_table_ddl(sname, child))
+
+                    # Collect indexes for main table + child partitions
+                    idxs = list(table_indexes.get(tname, []))
+                    for child in children:
+                        idxs.extend(table_indexes.get(child["name"], []))
+
+                    # Deduplicate indexes by index name
+                    seen_idx_names = set()
+                    unique_idxs = []
+                    for idx_item in idxs:
+                        if idx_item["name"] not in seen_idx_names:
+                            seen_idx_names.add(idx_item["name"])
+                            unique_idxs.append(idx_item)
+
+                    if unique_idxs:
+                        ddl_parts.append("-- Indexes")
+                        for idx_item in unique_idxs:
+                            ddl_parts.append(f"{idx_item['definition']};\n")
+
+                    full_ddl = "\n".join(ddl_parts)
+                    file_path.write_text(full_ddl, encoding="utf-8")
                     written_files.append(file_path)
 
+                # Orphaned child partitions (if parent is outside schema)
+                for child in child_tables:
+                    if child["name"] not in processed_child_names:
+                        file_path = tables_dir / f"{child['name']}.sql"
+                        full_ddl = self._generate_table_ddl(sname, child)
+                        file_path.write_text(full_ddl, encoding="utf-8")
+                        written_files.append(file_path)
+
             # 2. Dump Views
-            views = self.inspector.inspect_views(sname)
             if views:
                 views_dir = schema_dir / "views"
                 views_dir.mkdir(parents=True, exist_ok=True)
@@ -40,7 +111,6 @@ class SchemaDumper:
                     written_files.append(file_path)
 
             # 3. Dump Functions vs Procedures
-            routines = self.inspector.inspect_functions_and_procedures(sname)
             if routines:
                 funcs_dir = schema_dir / "functions"
                 procs_dir = schema_dir / "procedures"
@@ -57,12 +127,11 @@ class SchemaDumper:
                     file_path.write_text(ddl, encoding="utf-8")
                     written_files.append(file_path)
 
-            # 4. Dump Indexes (regular tables, partitioned tables, materialized views)
-            indexes = self.inspector.inspect_indexes(sname)
-            if indexes:
+            # 4. Dump Standalone Indexes (e.g. on views / materialized views)
+            if standalone_indexes:
                 indexes_dir = schema_dir / "indexes"
                 indexes_dir.mkdir(parents=True, exist_ok=True)
-                for idx in indexes:
+                for idx in standalone_indexes:
                     file_path = indexes_dir / f"{idx['name']}.sql"
                     ddl = f"{idx['definition']};\n"
                     file_path.write_text(ddl, encoding="utf-8")
@@ -85,7 +154,7 @@ class SchemaDumper:
             lines[-1] += ";\n"
             return "\n".join(lines)
 
-        # Case B & C: Partitioned Master Table or Regular Table
+        # Case B & C: Master Partitioned Table or Regular Table
         lines = [f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_info['name']} ("]
         col_defs = []
 

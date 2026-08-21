@@ -7,8 +7,17 @@ class SchemaDumper:
         self.inspector = PostgresInspector(db_url)
         self.output_dir = output_dir
 
-    def dump_schema(self) -> List[Path]:
+    def dump_schema(self, clean: bool = True) -> List[Path]:
         written_files: List[Path] = []
+
+        if clean and self.output_dir.exists():
+            import shutil
+            for child in self.output_dir.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                elif child.is_file():
+                    child.unlink()
+
         schemas = self.inspector.get_user_schemas()
 
         if not schemas:

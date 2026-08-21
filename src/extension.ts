@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { PsqlMigrCliRunner } from './cliRunner';
 import { SchemaObjectsTreeProvider } from './views/schemaExplorer';
 import { MigrationHistoryTreeProvider } from './views/migrationExplorer';
@@ -95,6 +97,23 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 4. Pull Schema from DB
     const pullSchemaCmd = vscode.commands.registerCommand('psqlmigr.pullSchema', async () => {
+        const schemaDirPath = path.join(workspaceRoot, 'schema');
+
+        // Check if schema directory exists and has existing contents
+        if (fs.existsSync(schemaDirPath)) {
+            const files = fs.readdirSync(schemaDirPath);
+            if (files.length > 0) {
+                const confirm = await vscode.window.showWarningMessage(
+                    'The "schema/" directory already contains files. Pulling from the database will OVERWRITE and CLEAR all existing DDL scripts in "schema/". Do you want to continue?',
+                    { modal: true },
+                    'Overwrite & Pull'
+                );
+                if (confirm !== 'Overwrite & Pull') {
+                    return;
+                }
+            }
+        }
+
         vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: 'Reverse-engineering PostgreSQL schema into schema/ folder...'

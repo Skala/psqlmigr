@@ -4,6 +4,8 @@ from typing import Dict, Any, Optional
 import yaml
 from dotenv import load_dotenv, set_key, find_dotenv
 
+from urllib.parse import quote_plus
+
 CONFIG_FILENAME = "psqlmigr.yaml"
 ENV_FILENAME = ".env"
 
@@ -58,9 +60,11 @@ class ConfigManager:
         sslmode = os.getenv("POSTGRES_SSLMODE") or os.getenv("PGSSLMODE")
 
         if host and user and db:
-            pass_str = f":{password}" if password else ""
+            user_enc = quote_plus(user)
+            pass_enc = f":{quote_plus(password)}" if password else ""
+            db_enc = quote_plus(db)
             ssl_str = f"?sslmode={sslmode}" if sslmode else ""
-            return f"postgresql://{user}{pass_str}@{host}:{port}/{db}{ssl_str}"
+            return f"postgresql://{user_enc}{pass_enc}@{host}:{port}/{db_enc}{ssl_str}"
 
         return None
 

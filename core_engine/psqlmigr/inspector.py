@@ -21,18 +21,28 @@ class PostgresInspector:
 
     def inspect_tables(self, schema_name: str) -> List[Dict[str, Any]]:
         query = """
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = %s AND table_type = 'BASE TABLE'
-            ORDER BY table_name;
+            SELECT 
+                c.relname AS table_name,
+                c.relkind AS relkind,
+                c.relispartition AS is_partition,
+                pg_get_partkeydef(c.oid) AS partition_by,
+                pg_get_expr(c.relpartbound, c.oid) AS partition_bound,
+                parent.relname AS parent_table
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            LEFT JOIN pg_inherits i ON i.inhrelid = c.oid
+            LEFT JOIN pg_class parent ON parent.oid = i.inhparent
+            WHERE n.nspname = %s
+              AND c.relkind IN ('r', 'p')
+            ORDER BY c.relname;
         """
         tables = []
         with psycopg.connect(self.db_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(query, (schema_name,))
-                table_names = [row[0] for row in cur.fetchall()]
+                rows = cur.fetchall()
 
-                for tname in table_names:
+                for tname, relkind, is_partition, part_by, part_bound, parent_tname in rows:
                     columns = self._get_table_columns(cur, schema_name, tname)
                     pk_cols = self._get_primary_key(cur, schema_name, tname)
                     fk_constraints = self._get_foreign_keys(cur, schema_name, tname)
@@ -40,6 +50,11 @@ class PostgresInspector:
 
                     tables.append({
                         "name": tname,
+                        "relkind": relkind,
+                        "is_partition": is_partition,
+                        "partition_by": part_by,
+                        "partition_bound": part_bound,
+                        "parent_table": parent_tname,
                         "columns": columns,
                         "primary_key": pk_cols,
                         "foreign_keys": fk_constraints,
@@ -174,7 +189,7 @@ class PostgresInspector:
                         "name": name,
                         "definition": fdef.strip(),
                         "language": lang,
-                        "kind": kind  # 'p' for procedure, 'f'/'a'/'w' for function
+                        "kind": kind
                     })
         return routines
 
@@ -189,6 +204,7 @@ class PostgresInspector:
             JOIN pg_class t ON t.oid = idx.indrelid
             JOIN pg_namespace n ON n.oid = t.relnamespace
             WHERE n.nspname = %s
+              AND t.relkind IN ('r', 'p', 'm')
               AND NOT idx.indisprimary
             ORDER BY i.relname;
         """

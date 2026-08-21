@@ -17,7 +17,7 @@ class SchemaDumper:
         for sname in schemas:
             schema_dir = self.output_dir / sname
             
-            # 1. Dump Tables
+            # 1. Dump Tables (regular, partitioned master, child partitions)
             tables = self.inspector.inspect_tables(sname)
             if tables:
                 tables_dir = schema_dir / "tables"
@@ -57,7 +57,7 @@ class SchemaDumper:
                     file_path.write_text(ddl, encoding="utf-8")
                     written_files.append(file_path)
 
-            # 4. Dump Indexes
+            # 4. Dump Indexes (regular tables, partitioned tables, materialized views)
             indexes = self.inspector.inspect_indexes(sname)
             if indexes:
                 indexes_dir = schema_dir / "indexes"
@@ -71,10 +71,25 @@ class SchemaDumper:
         return written_files
 
     def _generate_table_ddl(self, schema_name: str, table_info: Dict[str, Any]) -> str:
+        # Case A: Child Partition Table
+        if table_info.get("is_partition") and table_info.get("parent_table"):
+            parent = table_info["parent_table"]
+            part_bound = table_info.get("partition_bound") or ""
+            part_by = table_info.get("partition_by")
+
+            lines = [f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_info['name']} PARTITION OF {schema_name}.{parent}"]
+            if part_bound:
+                lines.append(f"    {part_bound}")
+            if part_by:
+                lines.append(f"PARTITION BY {part_by}")
+            lines[-1] += ";\n"
+            return "\n".join(lines)
+
+        # Case B & C: Partitioned Master Table or Regular Table
         lines = [f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_info['name']} ("]
         col_defs = []
 
-        for col in table_info["columns"]:
+        for col in table_info.get("columns", []):
             null_str = "" if col["nullable"] else " NOT NULL"
             def_str = f" DEFAULT {col['default']}" if col["default"] is not None else ""
             col_defs.append(f"    {col['name']} {col['type']}{null_str}{def_str}")
@@ -94,5 +109,11 @@ class SchemaDumper:
             col_defs.append(f"    CONSTRAINT {uq['constraint_name']} UNIQUE ({cols_str})")
 
         lines.append(",\n".join(col_defs))
-        lines.append(");\n")
+
+        part_by = table_info.get("partition_by")
+        if part_by:
+            lines.append(f") PARTITION BY {part_by};\n")
+        else:
+            lines.append(");\n")
+
         return "\n".join(lines)

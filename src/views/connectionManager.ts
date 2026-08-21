@@ -17,11 +17,10 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<Connectio
     private _onDidChangeTreeData: vscode.EventEmitter<ConnectionItem | undefined | null | void> = new vscode.EventEmitter<ConnectionItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<ConnectionItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
-    private cliRunner: PsqlMigrCliRunner;
-
-    constructor(private workspaceRoot: string) {
-        this.cliRunner = new PsqlMigrCliRunner(workspaceRoot);
-    }
+    constructor(
+        private workspaceRoot: string,
+        private cliRunner: PsqlMigrCliRunner
+    ) {}
 
     refresh(): void {
         this._onDidChangeTreeData.fire();

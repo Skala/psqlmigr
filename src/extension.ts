@@ -13,8 +13,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Tree View Providers
     const schemaTreeProvider = new SchemaObjectsTreeProvider(workspaceRoot);
-    const migrationTreeProvider = new MigrationHistoryTreeProvider(workspaceRoot);
-    const connectionTreeProvider = new ConnectionTreeProvider(workspaceRoot);
+    const migrationTreeProvider = new MigrationHistoryTreeProvider(workspaceRoot, cliRunner);
+    const connectionTreeProvider = new ConnectionTreeProvider(workspaceRoot, cliRunner);
 
     vscode.window.registerTreeDataProvider('psqlmigr-schema', schemaTreeProvider);
     vscode.window.registerTreeDataProvider('psqlmigr-migrations', migrationTreeProvider);

@@ -37,11 +37,10 @@ export class MigrationHistoryTreeProvider implements vscode.TreeDataProvider<Mig
     private _onDidChangeTreeData: vscode.EventEmitter<MigrationItem | undefined | null | void> = new vscode.EventEmitter<MigrationItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<MigrationItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
-    private cliRunner: PsqlMigrCliRunner;
-
-    constructor(private workspaceRoot: string) {
-        this.cliRunner = new PsqlMigrCliRunner(workspaceRoot);
-    }
+    constructor(
+        private workspaceRoot: string,
+        private cliRunner: PsqlMigrCliRunner
+    ) {}
 
     refresh(): void {
         this._onDidChangeTreeData.fire();

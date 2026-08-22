@@ -19,15 +19,23 @@ def test_init_command(tmp_path: Path):
     assert (tmp_path / "migrations").exists()
 
 def test_plan_command(tmp_path: Path, monkeypatch):
-    # Initialize project first
     runner.invoke(app, ["init", "--dir", str(tmp_path)])
     monkeypatch.chdir(tmp_path)
     
+    # Create sample schema DDL file
+    tables_dir = tmp_path / "schema" / "public" / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    (tables_dir / "users.sql").write_text("CREATE TABLE public.users (id INT PRIMARY KEY);", encoding="utf-8")
+
     result = runner.invoke(app, ["plan", "create_users_table"])
     assert result.exit_code == 0
     
     migrations = list((tmp_path / "migrations").glob("*.sql"))
     assert len(migrations) == 2  # .up.sql and .down.sql
+
+    up_file = [m for m in migrations if m.name.endswith(".up.sql")][0]
+    up_content = up_file.read_text(encoding="utf-8")
+    assert "CREATE TABLE public.users" in up_content
 
 def test_special_character_password_connection_url(tmp_path: Path, monkeypatch):
     from psqlmigr.config import ConfigManager

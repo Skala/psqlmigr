@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Tuple, Optional
-import sqlglot
 
 class MigrationGenerator:
     def __init__(self, migrations_dir: Path):
@@ -33,13 +32,52 @@ class MigrationGenerator:
     @staticmethod
     def read_all_schema_sql(schema_dir: Path) -> str:
         """
-        Concatenates all .sql files in the schema directory to build target DDL state.
+        Concatenates all .sql files in the schema directory in logical dependency order
+        (tables -> functions/procedures -> views -> standalone indexes) to build target DDL state.
         """
         if not schema_dir.exists():
-            return ""
-        
-        sql_parts = []
-        for file_path in sorted(schema_dir.glob("**/*.sql")):
-            sql_parts.append(f"-- File: {file_path.relative_to(schema_dir)}\n" + file_path.read_text(encoding="utf-8"))
-        
-        return "\n\n".join(sql_parts)
+            return "-- Migration UP SQL statements\n"
+
+        sql_files = list(schema_dir.glob("**/*.sql"))
+        if not sql_files:
+            return "-- Migration UP SQL statements\n"
+
+        def get_category_priority(p: Path) -> int:
+            parts = [part.lower() for part in p.parts]
+            if "tables" in parts:
+                return 1
+            if "functions" in parts or "procedures" in parts:
+                return 2
+            if "views" in parts:
+                return 3
+            if "indexes" in parts:
+                return 4
+            return 5
+
+        sorted_files = sorted(sql_files, key=lambda f: (get_category_priority(f), str(f)))
+
+        schemas = set()
+        for f in sorted_files:
+            rel = f.relative_to(schema_dir)
+            if len(rel.parts) > 1:
+                schemas.add(rel.parts[0])
+
+        parts = []
+        if schemas:
+            parts.append("-- Ensure Schemas Exist")
+            for sname in sorted(schemas):
+                if sname not in ("public", "psqlmigr"):
+                    parts.append(f"CREATE SCHEMA IF NOT EXISTS {sname};")
+            parts.append("")
+
+        for f in sorted_files:
+            rel_path = f.relative_to(schema_dir)
+            content = f.read_text(encoding="utf-8").strip()
+            if content:
+                parts.append(f"-- ==========================================")
+                parts.append(f"-- Object: {rel_path}")
+                parts.append(f"-- ==========================================")
+                parts.append(content)
+                parts.append("")
+
+        return "\n".join(parts)

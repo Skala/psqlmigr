@@ -195,9 +195,11 @@ def plan(
     cfg_mgr = ConfigManager()
     cfg_data = cfg_mgr.load_config()
     migrations_dir = Path.cwd() / cfg_data["migrations_dir"]
+    schema_dir = Path.cwd() / cfg_data["schema_dir"]
 
     gen = MigrationGenerator(migrations_dir)
-    up_path, down_path = gen.generate_migration(name)
+    up_sql = MigrationGenerator.read_all_schema_sql(schema_dir)
+    up_path, down_path = gen.generate_migration(name, up_sql=up_sql)
 
     up_rel = str(up_path.relative_to(Path.cwd()))
     down_rel = str(down_path.relative_to(Path.cwd()))

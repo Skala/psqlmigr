@@ -5,7 +5,10 @@ from typing import Tuple, Optional
 class MigrationGenerator:
     def __init__(self, migrations_dir: Path):
         self.migrations_dir = migrations_dir
-        self.migrations_dir.mkdir(parents=True, exist_ok=True)
+        self.up_dir = migrations_dir / "up"
+        self.down_dir = migrations_dir / "down"
+        self.up_dir.mkdir(parents=True, exist_ok=True)
+        self.down_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_migration(
         self,
@@ -18,11 +21,10 @@ class MigrationGenerator:
         if not clean_name:
             clean_name = "migration"
 
-        up_filename = f"{timestamp}_{clean_name}.up.sql"
-        down_filename = f"{timestamp}_{clean_name}.down.sql"
+        filename = f"{timestamp}_{clean_name}.sql"
 
-        up_file_path = self.migrations_dir / up_filename
-        down_file_path = self.migrations_dir / down_filename
+        up_file_path = self.up_dir / filename
+        down_file_path = self.down_dir / filename
 
         up_file_path.write_text(up_sql, encoding="utf-8")
         down_file_path.write_text(down_sql, encoding="utf-8")

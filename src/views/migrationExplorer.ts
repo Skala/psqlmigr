@@ -72,23 +72,45 @@ export class MigrationHistoryTreeProvider implements vscode.TreeDataProvider<Mig
             }
         }
 
-        // Read local migration files
-        const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.up.sql'));
+        // Read local migration files (check migrations/up/ first, then fallback to migrations/)
+        const upDir = path.join(migrationsDir, 'up');
         const items: MigrationItem[] = [];
 
-        for (const file of files) {
+        if (fs.existsSync(upDir)) {
+            const files = fs.readdirSync(upDir).filter(f => f.endsWith('.sql'));
+            for (const file of files) {
+                const version_name = file.slice(0, -4);
+                const [version, ...nameParts] = version_name.split('_');
+                const name = nameParts.join('_') || version_name;
+                const isApplied = appliedMap.has(version);
+                const upUri = vscode.Uri.file(path.join(upDir, file));
+
+                items.push(new MigrationItem(
+                    `${version} - ${name}`,
+                    version,
+                    isApplied ? 'APPLIED' : 'PENDING',
+                    upUri
+                ));
+            }
+        }
+
+        // Legacy root .up.sql files
+        const legacyFiles = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.up.sql'));
+        for (const file of legacyFiles) {
             const version_name = file.slice(0, -7);
             const [version, ...nameParts] = version_name.split('_');
             const name = nameParts.join('_') || version_name;
-            const isApplied = appliedMap.has(version);
-            const upUri = vscode.Uri.file(path.join(migrationsDir, file));
+            if (!items.some(i => i.version === version)) {
+                const isApplied = appliedMap.has(version);
+                const upUri = vscode.Uri.file(path.join(migrationsDir, file));
 
-            items.push(new MigrationItem(
-                `${version} - ${name}`,
-                version,
-                isApplied ? 'APPLIED' : 'PENDING',
-                upUri
-            ));
+                items.push(new MigrationItem(
+                    `${version} - ${name}`,
+                    version,
+                    isApplied ? 'APPLIED' : 'PENDING',
+                    upUri
+                ));
+            }
         }
 
         return items;

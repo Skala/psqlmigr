@@ -65,6 +65,8 @@ def init(
 
     schema_dir.mkdir(parents=True, exist_ok=True)
     migrations_dir.mkdir(parents=True, exist_ok=True)
+    (migrations_dir / "up").mkdir(parents=True, exist_ok=True)
+    (migrations_dir / "down").mkdir(parents=True, exist_ok=True)
 
     env_path = root / ".env"
     if not env_path.exists():

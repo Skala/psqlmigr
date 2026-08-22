@@ -16,7 +16,8 @@ def test_init_command(tmp_path: Path):
     assert (tmp_path / "psqlmigr.yaml").exists()
     assert (tmp_path / ".env").exists()
     assert (tmp_path / "schema").exists()
-    assert (tmp_path / "migrations").exists()
+    assert (tmp_path / "migrations" / "up").exists()
+    assert (tmp_path / "migrations" / "down").exists()
 
 def test_plan_command(tmp_path: Path, monkeypatch):
     runner.invoke(app, ["init", "--dir", str(tmp_path)])
@@ -30,11 +31,12 @@ def test_plan_command(tmp_path: Path, monkeypatch):
     result = runner.invoke(app, ["plan", "create_users_table"])
     assert result.exit_code == 0
     
-    migrations = list((tmp_path / "migrations").glob("*.sql"))
-    assert len(migrations) == 2  # .up.sql and .down.sql
+    up_files = list((tmp_path / "migrations" / "up").glob("*.sql"))
+    down_files = list((tmp_path / "migrations" / "down").glob("*.sql"))
+    assert len(up_files) == 1
+    assert len(down_files) == 1
 
-    up_file = [m for m in migrations if m.name.endswith(".up.sql")][0]
-    up_content = up_file.read_text(encoding="utf-8")
+    up_content = up_files[0].read_text(encoding="utf-8")
     assert "CREATE TABLE public.users" in up_content
 
 def test_special_character_password_connection_url(tmp_path: Path, monkeypatch):

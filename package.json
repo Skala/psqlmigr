@@ -89,6 +89,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "psqlmigr.deleteMigration",
+        "title": "PsqlMigr: Delete Migration Script",
+        "icon": "$(trash)"
+      },
+      {
         "command": "psqlmigr.refreshViews",
         "title": "PsqlMigr: Refresh Explorer Views",
         "icon": "$(refresh)"
@@ -130,6 +135,13 @@
           "command": "psqlmigr.refreshViews",
           "when": "view == psqlmigr-schema || view == psqlmigr-migrations || view == psqlmigr-connection",
           "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "psqlmigr.deleteMigration",
+          "when": "view == psqlmigr-migrations && viewItem == migration",
+          "group": "inline"
         }
       ]
     }

@@ -31,6 +31,20 @@ class MigrationGenerator:
 
         return up_file_path, down_file_path
 
+    def delete_migration(self, version_or_name: str) -> List[Path]:
+        deleted_files: List[Path] = []
+        clean_target = version_or_name.strip()
+
+        for search_dir in [self.up_dir, self.down_dir, self.migrations_dir]:
+            if not search_dir.exists():
+                continue
+            for file_path in search_dir.glob("*.sql"):
+                if clean_target in file_path.name:
+                    file_path.unlink()
+                    deleted_files.append(file_path)
+
+        return deleted_files
+
     @staticmethod
     def read_all_schema_sql(schema_dir: Path) -> str:
         """

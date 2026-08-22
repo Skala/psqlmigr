@@ -220,6 +220,38 @@ def plan(
         rprint(f"  - UP: [cyan]{up_rel}[/cyan]")
         rprint(f"  - DOWN: [cyan]{down_rel}[/cyan]")
 
+@app.command("remove-migration")
+@app.command("rm-migration")
+def remove_migration(
+    version: str = typer.Argument(..., help="Version timestamp or name of migration to remove"),
+    json_mode: bool = typer.Option(False, "--json", help="Output result as JSON")
+):
+    """Removes local UP and DOWN migration files for a given version timestamp or name."""
+    cfg_mgr = ConfigManager()
+    cfg_data = cfg_mgr.load_config()
+    migrations_dir = Path.cwd() / cfg_data["migrations_dir"]
+
+    gen = MigrationGenerator(migrations_dir)
+    deleted = gen.delete_migration(version)
+
+    deleted_paths = [str(f.relative_to(Path.cwd())) for f in deleted]
+
+    res = {
+        "success": True if deleted else False,
+        "message": f"Deleted {len(deleted)} migration files" if deleted else f"No migration files found matching '{version}'",
+        "deleted_files": deleted_paths
+    }
+
+    if json_mode:
+        print(json.dumps(res))
+    else:
+        if deleted:
+            rprint(f"[bold green]✓ Deleted migration files:[/bold green]")
+            for p in deleted_paths:
+                rprint(f"  - [yellow]{p}[/yellow]")
+        else:
+            rprint(f"[bold red]✗ No migration files found matching '{version}'[/bold red]")
+
 @app.command()
 def validate(
     json_mode: bool = typer.Option(False, "--json", help="Output result as JSON")

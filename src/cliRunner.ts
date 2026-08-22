@@ -112,6 +112,10 @@ export class PsqlMigrCliRunner {
         return this.execute(['plan', `"${name}"`]);
     }
 
+    public async removeMigration(version: string): Promise<CliResult> {
+        return this.execute(['remove-migration', `"${version}"`]);
+    }
+
     public async validateMigrations(): Promise<CliResult> {
         return this.execute(['validate']);
     }

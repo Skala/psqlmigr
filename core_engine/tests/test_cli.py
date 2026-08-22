@@ -39,6 +39,20 @@ def test_plan_command(tmp_path: Path, monkeypatch):
     up_content = up_files[0].read_text(encoding="utf-8")
     assert "CREATE TABLE public.users" in up_content
 
+def test_remove_migration_command(tmp_path: Path, monkeypatch):
+    runner.invoke(app, ["init", "--dir", str(tmp_path)])
+    monkeypatch.chdir(tmp_path)
+    
+    runner.invoke(app, ["plan", "temp_migration"])
+    up_files = list((tmp_path / "migrations" / "up").glob("*.sql"))
+    assert len(up_files) == 1
+
+    version_prefix = up_files[0].name.split("_")[0]
+    rm_res = runner.invoke(app, ["remove-migration", version_prefix])
+    assert rm_res.exit_code == 0
+    assert not list((tmp_path / "migrations" / "up").glob("*.sql"))
+    assert not list((tmp_path / "migrations" / "down").glob("*.sql"))
+
 def test_special_character_password_connection_url(tmp_path: Path, monkeypatch):
     from psqlmigr.config import ConfigManager
     import psycopg.conninfo

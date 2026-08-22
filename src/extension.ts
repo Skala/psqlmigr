@@ -191,6 +191,47 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // 9. Delete Migration
+    const deleteMigrationCmd = vscode.commands.registerCommand('psqlmigr.deleteMigration', async (item?: any) => {
+        let versionToDelete = item?.version;
+
+        if (!versionToDelete) {
+            const manifestRes = await cliRunner.checksum();
+            if (!manifestRes.success || !Array.isArray(manifestRes.migrations) || manifestRes.migrations.length === 0) {
+                vscode.window.showInformationMessage('No migration files found to delete.');
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(
+                manifestRes.migrations.map((m: any) => ({
+                    label: `${m.version} - ${m.name}`,
+                    version: m.version
+                })),
+                { prompt: 'Select a migration to delete' }
+            );
+            if (!picked) {
+                return;
+            }
+            versionToDelete = picked.version;
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+            `Are you sure you want to PERMANENTLY DELETE migration '${versionToDelete}'? This will remove both UP and DOWN files from disk.`,
+            { modal: true },
+            'Delete Migration'
+        );
+        if (confirm !== 'Delete Migration') {
+            return;
+        }
+
+        const res = await cliRunner.removeMigration(versionToDelete);
+        if (res.success) {
+            vscode.window.showInformationMessage(`✓ Migration ${versionToDelete} deleted successfully!`);
+            refreshAllViews();
+        } else {
+            vscode.window.showErrorMessage(`Delete migration failed: ${res.error || res.message}`);
+        }
+    });
+
     // 9. Refresh Views
     const refreshCmd = vscode.commands.registerCommand('psqlmigr.refreshViews', () => {
         refreshAllViews();
@@ -205,6 +246,7 @@ export function activate(context: vscode.ExtensionContext) {
         validateCmd,
         applyCmd,
         checksumCmd,
+        deleteMigrationCmd,
         refreshCmd
     );
 }

@@ -69,6 +69,11 @@
         "icon": "$(cloud-download)"
       },
       {
+        "command": "psqlmigr.syncSchema",
+        "title": "PsqlMigr: Compare & Sync Schema from Database",
+        "icon": "$(diff)"
+      },
+      {
         "command": "psqlmigr.generateMigration",
         "title": "PsqlMigr: Generate Migration (Plan)",
         "icon": "$(add)"
@@ -117,6 +122,11 @@
           "group": "navigation"
         },
         {
+          "command": "psqlmigr.syncSchema",
+          "when": "view == psqlmigr-schema",
+          "group": "navigation"
+        },
+        {
           "command": "psqlmigr.generateMigration",
           "when": "view == psqlmigr-migrations",
           "group": "navigation"
@@ -152,7 +162,8 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "package": "npx @vscode/vsce package"
   },
   "devDependencies": {
     "@types/vscode": "^1.80.0",

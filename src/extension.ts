@@ -6,12 +6,31 @@ import { SchemaObjectsTreeProvider } from './views/schemaExplorer';
 import { MigrationHistoryTreeProvider } from './views/migrationExplorer';
 import { ConnectionTreeProvider } from './views/connectionManager';
 
+class SchemaDiffContentProvider implements vscode.TextDocumentContentProvider {
+    private contents = new Map<string, string>();
+    private _onDidChange = new vscode.EventEmitter<vscode.Uri>();
+    readonly onDidChange = this._onDidChange.event;
+
+    public setContent(uri: vscode.Uri, content: string): void {
+        this.contents.set(uri.toString(), content);
+        this._onDidChange.fire(uri);
+    }
+
+    provideTextDocumentContent(uri: vscode.Uri): string {
+        return this.contents.get(uri.toString()) || '';
+    }
+}
+
 export function activate(context: vscode.ExtensionContext) {
     const workspaceRoot = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
         ? vscode.workspace.workspaceFolders[0].uri.fsPath
         : process.cwd();
 
     const cliRunner = new PsqlMigrCliRunner(workspaceRoot, context.extensionPath);
+
+    // Virtual document provider for side-by-side schema diffs
+    const diffProvider = new SchemaDiffContentProvider();
+    const diffProviderReg = vscode.workspace.registerTextDocumentContentProvider('psqlmigr-diff', diffProvider);
 
     // Tree View Providers
     const schemaTreeProvider = new SchemaObjectsTreeProvider(workspaceRoot, cliRunner);
@@ -43,27 +62,70 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 2. Configure Connection & Save to .env
     const configConnCmd = vscode.commands.registerCommand('psqlmigr.configureConnection', async () => {
-        const host = await vscode.window.showInputBox({ prompt: 'PostgreSQL Host', value: 'localhost' });
+        const existingEnv: Record<string, string> = {};
+        const envFilePath = path.join(workspaceRoot, '.env');
+        if (fs.existsSync(envFilePath)) {
+            const lines = fs.readFileSync(envFilePath, 'utf-8').split(/\r?\n/);
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('#')) {
+                    continue;
+                }
+                const eqIdx = trimmed.indexOf('=');
+                if (eqIdx > 0) {
+                    const key = trimmed.substring(0, eqIdx).trim();
+                    const val = trimmed.substring(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+                    existingEnv[key] = val;
+                }
+            }
+        }
+
+        const host = await vscode.window.showInputBox({
+            title: 'PostgreSQL Connection Setup (1/5): Host',
+            prompt: 'PostgreSQL Host',
+            value: existingEnv['POSTGRES_HOST'] || 'localhost',
+            ignoreFocusOut: true
+        });
         if (!host) {
             return;
         }
 
-        const port = await vscode.window.showInputBox({ prompt: 'PostgreSQL Port', value: '5432' });
+        const port = await vscode.window.showInputBox({
+            title: 'PostgreSQL Connection Setup (2/5): Port',
+            prompt: 'PostgreSQL Port',
+            value: existingEnv['POSTGRES_PORT'] || '5432',
+            ignoreFocusOut: true
+        });
         if (!port) {
             return;
         }
 
-        const user = await vscode.window.showInputBox({ prompt: 'PostgreSQL User', value: 'postgres' });
+        const user = await vscode.window.showInputBox({
+            title: 'PostgreSQL Connection Setup (3/5): User',
+            prompt: 'PostgreSQL User',
+            value: existingEnv['POSTGRES_USER'] || 'postgres',
+            ignoreFocusOut: true
+        });
         if (!user) {
             return;
         }
 
-        const password = await vscode.window.showInputBox({ prompt: 'PostgreSQL Password', password: true });
+        const password = await vscode.window.showInputBox({
+            title: 'PostgreSQL Connection Setup (4/5): Password',
+            prompt: 'PostgreSQL Password',
+            password: true,
+            ignoreFocusOut: true
+        });
         if (password === undefined) {
             return;
         }
 
-        const database = await vscode.window.showInputBox({ prompt: 'PostgreSQL Database Name' });
+        const database = await vscode.window.showInputBox({
+            title: 'PostgreSQL Connection Setup (5/5): Database Name',
+            prompt: 'PostgreSQL Database Name',
+            value: existingEnv['POSTGRES_DB'] || '',
+            ignoreFocusOut: true
+        });
         if (!database) {
             return;
         }
@@ -97,14 +159,14 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 4. Pull Schema from DB
     const pullSchemaCmd = vscode.commands.registerCommand('psqlmigr.pullSchema', async () => {
-        const schemaDirPath = path.join(workspaceRoot, 'schema');
+        const schemaDirPath = path.join(workspaceRoot, 'schemas');
 
-        // Check if schema directory exists and has existing contents
+        // Check if schemas directory exists and has existing contents
         if (fs.existsSync(schemaDirPath)) {
             const files = fs.readdirSync(schemaDirPath);
             if (files.length > 0) {
                 const confirm = await vscode.window.showWarningMessage(
-                    'The "schema/" directory already contains files. Pulling from the database will OVERWRITE and CLEAR all existing DDL scripts in "schema/". Do you want to continue?',
+                    'The "schemas/" directory already contains files. Pulling from the database will OVERWRITE and CLEAR all existing DDL scripts in "schemas/". Do you want to continue?',
                     { modal: true },
                     'Overwrite & Pull'
                 );
@@ -116,7 +178,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: 'Reverse-engineering PostgreSQL schema into schema/ folder...'
+            title: 'Reverse-engineering PostgreSQL schema into schemas/ folder...'
         }, async () => {
             const res = await cliRunner.pullSchema();
             if (res.success) {
@@ -128,37 +190,178 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 
+    // 4b. Compare & Sync Schema from Database (Selective Update)
+    const syncSchemaCmd = vscode.commands.registerCommand('psqlmigr.syncSchema', async () => {
+        const diffRes = await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: 'Comparing PostgreSQL database schemas with local schemas/ folder...'
+        }, async () => {
+            return await cliRunner.diffSchema();
+        });
+
+        if (!diffRes.success) {
+            vscode.window.showErrorMessage(`Schema comparison failed: ${diffRes.error || diffRes.message}`);
+            return;
+        }
+
+        const diffs: Array<{
+            rel_path: string;
+            status: 'ADDED_IN_DB' | 'MODIFIED' | 'DELETED_IN_DB';
+            db_ddl: string | null;
+            local_ddl: string | null;
+            diff: string;
+        }> = diffRes.diffs || [];
+
+        if (diffs.length === 0) {
+            vscode.window.showInformationMessage('✓ Local schemas/ folder is completely in sync with the PostgreSQL database!');
+            return;
+        }
+
+        interface DiffQuickPickItem extends vscode.QuickPickItem {
+            diffItem: typeof diffs[0];
+        }
+
+        const viewDiffButton: vscode.QuickInputButton = {
+            iconPath: new vscode.ThemeIcon('diff'),
+            tooltip: 'Open Side-by-Side Diff (Local vs Database)'
+        };
+
+        const quickPick = vscode.window.createQuickPick<DiffQuickPickItem>();
+        quickPick.title = `Schema Differences (${diffs.length} found) — Select objects to update in project`;
+        quickPick.placeholder = 'Check items to apply to local schemas/ folder (click the diff icon on the right to preview SQL changes)';
+        quickPick.canSelectMany = true;
+        quickPick.ignoreFocusOut = true;
+
+        const items: DiffQuickPickItem[] = diffs.map(d => {
+            let icon = '$(diff-modified)';
+            let statusDesc = '[MODIFIED — Update local file from DB]';
+            if (d.status === 'ADDED_IN_DB') {
+                icon = '$(diff-added)';
+                statusDesc = '[NEW IN DB — Create file in schemas/]';
+            } else if (d.status === 'DELETED_IN_DB') {
+                icon = '$(diff-removed)';
+                statusDesc = '[MISSING IN DB — Delete file from schemas/]';
+            }
+
+            const previewLines = (d.diff || '')
+                .split(/\r?\n/)
+                .filter(l => (l.startsWith('+') && !l.startsWith('+++')) || (l.startsWith('-') && !l.startsWith('---')))
+                .slice(0, 3)
+                .join('  ');
+
+            return {
+                label: `${icon} ${d.rel_path}`,
+                description: statusDesc,
+                detail: previewLines || undefined,
+                picked: d.status !== 'DELETED_IN_DB',
+                buttons: [viewDiffButton],
+                diffItem: d
+            };
+        });
+
+        quickPick.items = items;
+        quickPick.selectedItems = items.filter(i => i.picked);
+
+        quickPick.onDidTriggerItemButton(async (event) => {
+            const d = event.item.diffItem;
+            const localUri = vscode.Uri.parse(`psqlmigr-diff:/local/${d.rel_path}`);
+            const dbUri = vscode.Uri.parse(`psqlmigr-diff:/database/${d.rel_path}`);
+
+            diffProvider.setContent(localUri, d.local_ddl ?? '-- [File does not exist locally in schemas/]\n');
+            diffProvider.setContent(dbUri, d.db_ddl ?? '-- [Object does not exist in PostgreSQL database]\n');
+
+            await vscode.commands.executeCommand(
+                'vscode.diff',
+                localUri,
+                dbUri,
+                `Schema Diff: ${d.rel_path} (Local Project ↔ Database)`
+            );
+        });
+
+        quickPick.onDidAccept(async () => {
+            const selected = quickPick.selectedItems.map(i => i.diffItem.rel_path);
+            quickPick.hide();
+
+            if (selected.length === 0) {
+                vscode.window.showInformationMessage('No schema differences selected. Project was not modified.');
+                return;
+            }
+
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `Updating ${selected.length} schema object(s) in schemas/...`
+            }, async () => {
+                const syncRes = await cliRunner.syncSchema(selected);
+                if (syncRes.success) {
+                    const writtenCount = syncRes.written?.length || 0;
+                    const deletedCount = syncRes.deleted?.length || 0;
+                    vscode.window.showInformationMessage(
+                        `✓ Schema synchronized! Updated: ${writtenCount}, Deleted: ${deletedCount}.`
+                    );
+                    refreshAllViews();
+                } else {
+                    vscode.window.showErrorMessage(`Sync schema failed: ${syncRes.error || syncRes.message}`);
+                }
+            });
+        });
+
+        quickPick.onDidHide(() => quickPick.dispose());
+        quickPick.show();
+    });
+
     // 5. Generate Migration (Plan)
     const planCmd = vscode.commands.registerCommand('psqlmigr.generateMigration', async () => {
         const name = await vscode.window.showInputBox({
+            title: 'Generate Migration (1/2): Description',
             prompt: 'Enter migration description (e.g. create_users_table)',
-            placeHolder: 'create_users_table'
+            placeHolder: 'create_users_table',
+            ignoreFocusOut: true
         });
         if (!name) {
             return;
         }
 
-        const res = await cliRunner.planMigration(name);
-        if (res.success) {
-            vscode.window.showInformationMessage(`✓ Migration files created: ${res.up_file}`);
-            if (res.up_file) {
-                const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(`${workspaceRoot}/${res.up_file}`));
-                vscode.window.showTextDocument(doc);
-            }
-            refreshAllViews();
-        } else {
-            vscode.window.showErrorMessage(`Generate migration failed: ${res.error || res.message}`);
+        const versionTag = await vscode.window.showInputBox({
+            title: 'Generate Migration (2/2): Version',
+            prompt: 'Enter migration version (Leave empty for automatic version bump)',
+            placeHolder: 'e.g. 0.1.0 or 0.2.0 (press Enter for auto-bump)',
+            ignoreFocusOut: true
+        });
+        if (versionTag === undefined) {
+            return;
         }
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: 'Analyzing schema dependencies & generating migration...'
+        }, async () => {
+            const res = await cliRunner.planMigration(name, versionTag);
+            if (res.success) {
+                vscode.window.showInformationMessage(`✓ Migration [${res.project_version || ''}] created: ${res.up_file}`);
+                if (res.up_file) {
+                    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(`${workspaceRoot}/${res.up_file}`));
+                    vscode.window.showTextDocument(doc);
+                }
+                refreshAllViews();
+            } else {
+                vscode.window.showErrorMessage(`Generate migration failed: ${res.error || res.message}`);
+            }
+        });
     });
 
     // 6. Validate Migrations (Debug Dry-Run)
     const validateCmd = vscode.commands.registerCommand('psqlmigr.validateMigrations', async () => {
-        const res = await cliRunner.validateMigrations();
-        if (res.success) {
-            vscode.window.showInformationMessage(`✓ Dry-Run Validation Passed! All migrations executed cleanly in test transaction.`);
-        } else {
-            vscode.window.showErrorMessage(`Dry-Run Validation Failed: ${res.error || res.message}`);
-        }
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: 'Validating pending migrations in test transaction (dry-run)...'
+        }, async () => {
+            const res = await cliRunner.validateMigrations();
+            if (res.success) {
+                vscode.window.showInformationMessage(`✓ Dry-Run Validation Passed! All migrations executed cleanly in test transaction.`);
+            } else {
+                vscode.window.showErrorMessage(`Dry-Run Validation Failed: ${res.error || res.message}`);
+            }
+        });
     });
 
     // 7. Apply Migrations
@@ -172,13 +375,18 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        const res = await cliRunner.applyMigrations();
-        if (res.success) {
-            vscode.window.showInformationMessage(`✓ Applied ${res.executed_migrations?.length || 0} migrations successfully!`);
-            refreshAllViews();
-        } else {
-            vscode.window.showErrorMessage(`Apply migrations failed: ${res.error || res.message}`);
-        }
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: 'Applying pending migrations to PostgreSQL database...'
+        }, async () => {
+            const res = await cliRunner.applyMigrations();
+            if (res.success) {
+                vscode.window.showInformationMessage(`✓ Applied ${res.executed_migrations?.length || 0} migrations successfully!`);
+                refreshAllViews();
+            } else {
+                vscode.window.showErrorMessage(`Apply migrations failed: ${res.error || res.message}`);
+            }
+        });
     });
 
     // 8. Recalculate Checksums
@@ -206,7 +414,7 @@ export function activate(context: vscode.ExtensionContext) {
                     label: `${m.version} - ${m.name}`,
                     version: m.version
                 })),
-                { prompt: 'Select a migration to delete' }
+                { prompt: 'Select a migration to delete', ignoreFocusOut: true }
             );
             if (!picked) {
                 return;
@@ -232,16 +440,18 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    // 9. Refresh Views
+    // 10. Refresh Views
     const refreshCmd = vscode.commands.registerCommand('psqlmigr.refreshViews', () => {
         refreshAllViews();
     });
 
     context.subscriptions.push(
+        diffProviderReg,
         initCmd,
         configConnCmd,
         testConnCmd,
         pullSchemaCmd,
+        syncSchemaCmd,
         planCmd,
         validateCmd,
         applyCmd,

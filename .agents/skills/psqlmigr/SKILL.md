@@ -15,7 +15,7 @@ All commands can be run via shell or `psqlmigr-core` Python binary (`core_engine
 ```bash
 psqlmigr init
 ```
-Creates `psqlmigr.yaml`, `.env`, `schema/` folder, and `migrations/` folder.
+Creates `psqlmigr.yaml`, `.env`, `schemas/` folder, and `migrations/` folder.
 
 ### 2. Configure Database Connection & Test `.env`
 ```bash
@@ -28,8 +28,15 @@ psqlmigr test-connection --json
 psqlmigr pull --json
 ```
 Inspects live PostgreSQL database and dumps structured DDL SQL files into:
-`schema/<schema_name>/<object_type>/<object_name>.sql`
-(e.g., `schema/public/tables/users.sql`, `schema/public/functions/calculate_total.sql`).
+`schemas/<schema_name>/<object_type>/<object_name>.sql`
+(e.g., `schemas/public/tables/users.sql`, `schemas/public/functions/calculate_total.sql`).
+
+### 3b. Compare & Selectively Sync Database Schema with Local Project
+```bash
+psqlmigr diff --json
+psqlmigr sync --file public/tables/users.sql --json
+```
+Compares live PostgreSQL database objects against local `schemas/` files (`ADDED_IN_DB`, `MODIFIED`, `DELETED_IN_DB`) and updates only the user-selected objects in `schemas/`.
 
 ### 4. Plan & Generate Timestamped Migration Files
 ```bash
@@ -64,7 +71,7 @@ psqlmigr status --json
 Lists all applied and pending migrations along with timestamps and checksum audit logs.
 
 ## Workspace Layout
-- `schema/` - Declarative SQL state organized by schema and object type.
+- `schemas/` - Declarative SQL state organized by schema and object type.
 - `migrations/` - Timestamped migration scripts (`YYYYMMDDHHMMSS_name.up.sql` / `.down.sql`).
 - `psqlmigr.yaml` - Project configuration (tracking schema: `psqlmigr`).
 - `.env` - Database connection environment variables.

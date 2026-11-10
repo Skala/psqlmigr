@@ -1,9 +1,11 @@
 import sys
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 # Ensure UTF-8 output encoding on Windows console
+if str(Path(__file__).resolve().parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if sys.platform == "win32":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -164,33 +166,225 @@ def set_env(
 def pull_schema(
     json_mode: bool = typer.Option(False, "--json", help="Output result as JSON")
 ):
-    """Reverse-engineers PostgreSQL database and dumps DDL SQL files into schema/<schema_name>/<object_type>/<object_name>.sql."""
+    """Reverse-engineers PostgreSQL database and dumps DDL SQL files into schemas/<schema_name>/<object_type>/<object_name>.sql."""
     cfg_mgr = ConfigManager()
     db_url = get_db_url_or_exit(cfg_mgr, json_mode)
     cfg_data = cfg_mgr.load_config()
 
-    schema_dir = Path.cwd() / cfg_data["schema_dir"]
-    dumper = SchemaDumper(db_url, schema_dir)
-    written_files = dumper.dump_schema()
+    try:
+        schema_dir = Path.cwd() / cfg_data["schema_dir"]
+        dumper = SchemaDumper(db_url, schema_dir)
 
-    file_paths = [str(f.relative_to(Path.cwd())) for f in written_files]
+        if not json_mode:
+            with console.status(f"[bold cyan]Reverse-engineering PostgreSQL schema into {schema_dir.name}/ folder...[/bold cyan]"):
+                written_files = dumper.dump_schema()
+        else:
+            written_files = dumper.dump_schema()
 
-    res = {
-        "success": True,
-        "message": f"Successfully dumped {len(written_files)} schema files into {schema_dir.name}/",
-        "files_written": file_paths
-    }
+        file_paths = [str(f.relative_to(Path.cwd())) for f in written_files]
 
-    if json_mode:
-        print(json.dumps(res))
-    else:
-        rprint(f"[bold green]✓ Successfully reverse-engineered schema into [cyan]{schema_dir.name}/[/cyan][/bold green]")
-        for f in file_paths:
-            rprint(f"  - [yellow]{f}[/yellow]")
+        res = {
+            "success": True,
+            "message": f"Successfully dumped {len(written_files)} schema files into {schema_dir.name}/",
+            "files_written": file_paths
+        }
+
+        if json_mode:
+            print(json.dumps(res))
+        else:
+            rprint(f"[bold green]✓ Successfully reverse-engineered schema into [cyan]{schema_dir.name}/[/cyan][/bold green]")
+            for f in file_paths:
+                rprint(f"  - [yellow]{f}[/yellow]")
+    except Exception as e:
+        if json_mode:
+            print(json.dumps({"success": False, "error": str(e), "message": f"Pull schema failed: {str(e)}"}))
+            raise typer.Exit(code=0)
+        else:
+            rprint(f"[bold red]✗ Pull schema failed:[/bold red] {str(e)}")
+            raise typer.Exit(code=1)
+
+def _print_colored_diff(diff_text: str) -> None:
+    for line in diff_text.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            rprint(f"    [bold]{line}[/bold]")
+        elif line.startswith("@@"):
+            rprint(f"    [cyan]{line}[/cyan]")
+        elif line.startswith("+"):
+            rprint(f"    [green]{line}[/green]")
+        elif line.startswith("-"):
+            rprint(f"    [red]{line}[/red]")
+        else:
+            rprint(f"    {line}")
+
+@app.command("diff")
+def diff_schema_cmd(
+    json_mode: bool = typer.Option(False, "--json", help="Output result as JSON")
+):
+    """Compares live PostgreSQL database schemas against local schemas/ directory and displays differences."""
+    cfg_mgr = ConfigManager()
+    db_url = get_db_url_or_exit(cfg_mgr, json_mode)
+    cfg_data = cfg_mgr.load_config()
+
+    try:
+        schema_dir = Path.cwd() / cfg_data["schema_dir"]
+        dumper = SchemaDumper(db_url, schema_dir)
+
+        if not json_mode:
+            with console.status(f"[bold cyan]Comparing PostgreSQL database against {schema_dir.name}/ folder...[/bold cyan]"):
+                diffs = dumper.diff_schema()
+        else:
+            diffs = dumper.diff_schema()
+
+        res = {
+            "success": True,
+            "total_diffs": len(diffs),
+            "diffs": diffs,
+            "message": f"Found {len(diffs)} schema differences." if diffs else "No differences found. Project is in sync with database."
+        }
+
+        if json_mode:
+            print(json.dumps(res))
+        else:
+            if not diffs:
+                rprint(f"[bold green]✓ Local {schema_dir.name}/ directory is completely in sync with the database![/bold green]")
+                return
+
+            table = Table(title=f"Schema Differences (Database vs {schema_dir.name}/)")
+            table.add_column("Status", style="bold")
+            table.add_column("Object Path", style="cyan")
+            table.add_column("Action if Synced", style="yellow")
+
+            for d in diffs:
+                st = d["status"]
+                if st == "ADDED_IN_DB":
+                    st_str = "[bold green]ADDED_IN_DB[/bold green]"
+                    action_str = "Create local file from DB"
+                elif st == "MODIFIED":
+                    st_str = "[bold yellow]MODIFIED[/bold yellow]"
+                    action_str = "Update local file from DB"
+                else:
+                    st_str = "[bold red]DELETED_IN_DB[/bold red]"
+                    action_str = "Delete local file (missing in DB)"
+                table.add_row(st_str, d["rel_path"], action_str)
+
+            console.print(table)
+            rprint("\n[bold]Detailed SQL Diffs:[/bold]")
+            for d in diffs:
+                rprint(f"\n[bold cyan]• {d['rel_path']}[/bold cyan] ({d['status']}):")
+                _print_colored_diff(d["diff"])
+    except Exception as e:
+        if json_mode:
+            print(json.dumps({"success": False, "error": str(e), "message": f"Diff schema failed: {str(e)}"}))
+            raise typer.Exit(code=0)
+        else:
+            rprint(f"[bold red]✗ Diff schema failed:[/bold red] {str(e)}")
+            raise typer.Exit(code=1)
+
+@app.command("sync")
+def sync_schema_cmd(
+    files: Optional[List[str]] = typer.Option(None, "--file", "-f", help="Relative path(s) in schemas/ to update from database"),
+    apply_all: bool = typer.Option(False, "--all", "-a", help="Apply all detected differences without prompting"),
+    json_mode: bool = typer.Option(False, "--json", help="Output result as JSON")
+):
+    """Compares database schemas with local project and updates user-selected differences in schemas/."""
+    cfg_mgr = ConfigManager()
+    db_url = get_db_url_or_exit(cfg_mgr, json_mode)
+    cfg_data = cfg_mgr.load_config()
+
+    try:
+        schema_dir = Path.cwd() / cfg_data["schema_dir"]
+        dumper = SchemaDumper(db_url, schema_dir)
+
+        if not json_mode:
+            with console.status(f"[bold cyan]Comparing PostgreSQL database against {schema_dir.name}/ folder...[/bold cyan]"):
+                diffs = dumper.diff_schema()
+        else:
+            diffs = dumper.diff_schema()
+
+        if not diffs:
+            res = {
+                "success": True,
+                "message": "No differences found. Project is already in sync with database.",
+                "written": [],
+                "deleted": []
+            }
+            if json_mode:
+                print(json.dumps(res))
+            else:
+                rprint(f"[bold green]✓ Local {schema_dir.name}/ directory is already in sync with the database![/bold green]")
+            return
+
+        selected_paths: List[str] = []
+
+        if apply_all:
+            selected_paths = [d["rel_path"] for d in diffs]
+        elif files:
+            for f_arg in files:
+                for part in f_arg.split(","):
+                    cleaned = part.strip()
+                    if cleaned:
+                        selected_paths.append(cleaned)
+        elif not json_mode:
+            rprint(f"[bold cyan]Found {len(diffs)} difference(s) between database and {schema_dir.name}/.[/bold cyan]")
+            auto_accept_rest = False
+            for idx, d in enumerate(diffs, start=1):
+                rel_path = d["rel_path"]
+                status = d["status"]
+                rprint(f"\n[bold]({idx}/{len(diffs)}) [{status}] [cyan]{rel_path}[/cyan][/bold]")
+                _print_colored_diff(d["diff"])
+
+                if auto_accept_rest:
+                    selected_paths.append(rel_path)
+                    continue
+
+                action_desc = "Delete local file" if status == "DELETED_IN_DB" else "Update local file from DB"
+                choice = typer.prompt(
+                    f"{action_desc} '{rel_path}'? [y = yes, n = no, a = all remaining, q = quit]",
+                    default="n"
+                ).strip().lower()
+
+                if choice == "y":
+                    selected_paths.append(rel_path)
+                elif choice == "a":
+                    selected_paths.append(rel_path)
+                    auto_accept_rest = True
+                elif choice == "q":
+                    break
+
+        applied = dumper.apply_selected_diffs(selected_paths, diffs=diffs)
+        total_changed = len(applied["written"]) + len(applied["deleted"])
+
+        res = {
+            "success": True,
+            "message": f"Updated {len(applied['written'])} file(s) and deleted {len(applied['deleted'])} file(s) in {schema_dir.name}/.",
+            "written": applied["written"],
+            "deleted": applied["deleted"],
+            "total_changed": total_changed
+        }
+
+        if json_mode:
+            print(json.dumps(res))
+        else:
+            if total_changed == 0:
+                rprint("[bold yellow]No changes were applied to the project.[/bold yellow]")
+            else:
+                rprint(f"\n[bold green]✓ Synchronized {total_changed} schema object(s) in {schema_dir.name}/:[/bold green]")
+                for w in applied["written"]:
+                    rprint(f"  - [green]UPDATED[/green]: [cyan]{w}[/cyan]")
+                for rm in applied["deleted"]:
+                    rprint(f"  - [red]DELETED[/red]: [cyan]{rm}[/cyan]")
+    except Exception as e:
+        if json_mode:
+            print(json.dumps({"success": False, "error": str(e), "message": f"Sync schema failed: {str(e)}"}))
+            raise typer.Exit(code=0)
+        else:
+            rprint(f"[bold red]✗ Sync schema failed:[/bold red] {str(e)}")
+            raise typer.Exit(code=1)
 
 @app.command()
 def plan(
     name: str = typer.Argument(..., help="Short description for the migration"),
+    version_tag: Optional[str] = typer.Option(None, "--version", "-v", help="Migration project version tag (e.g. 0.1.0 or 0.2.0)"),
     json_mode: bool = typer.Option(False, "--json", help="Output result as JSON")
 ):
     """Generates timestamped migration files YYYYMMDDHHMMSS_name.up.sql and .down.sql."""
@@ -200,8 +394,16 @@ def plan(
     schema_dir = Path.cwd() / cfg_data["schema_dir"]
 
     gen = MigrationGenerator(migrations_dir)
-    up_sql = MigrationGenerator.read_all_schema_sql(schema_dir)
-    up_path, down_path = gen.generate_migration(name, up_sql=up_sql)
+    
+    if not json_mode:
+        with console.status("[bold cyan]Analyzing schema dependencies & generating migration...[/bold cyan]"):
+            up_sql = MigrationGenerator.read_all_schema_sql(schema_dir)
+            down_sql = MigrationGenerator.generate_down_sql_from_schema(schema_dir)
+            up_path, down_path, proj_ver = gen.generate_migration(name, up_sql=up_sql, down_sql=down_sql, project_version=version_tag)
+    else:
+        up_sql = MigrationGenerator.read_all_schema_sql(schema_dir)
+        down_sql = MigrationGenerator.generate_down_sql_from_schema(schema_dir)
+        up_path, down_path, proj_ver = gen.generate_migration(name, up_sql=up_sql, down_sql=down_sql, project_version=version_tag)
 
     up_rel = str(up_path.relative_to(Path.cwd()))
     down_rel = str(down_path.relative_to(Path.cwd()))
@@ -209,6 +411,7 @@ def plan(
     res = {
         "success": True,
         "message": f"Generated migration files: {up_rel}, {down_rel}",
+        "project_version": proj_ver,
         "up_file": up_rel,
         "down_file": down_rel
     }
@@ -262,22 +465,42 @@ def validate(
     cfg_data = cfg_mgr.load_config()
     migrations_dir = Path.cwd() / cfg_data["migrations_dir"]
 
-    executor = MigrationExecutor(db_url, cfg_data["tracking_schema"], cfg_data["tracking_table"])
-    results = executor.validate_migrations_dry_run(migrations_dir)
+    try:
+        executor = MigrationExecutor(db_url, cfg_data["tracking_schema"], cfg_data["tracking_table"])
+        if not json_mode:
+            with console.status("[bold cyan]Validating pending migrations in test transaction (dry-run)...[/bold cyan]"):
+                results = executor.validate_migrations_dry_run(migrations_dir)
+        else:
+            results = executor.validate_migrations_dry_run(migrations_dir)
 
-    res = {
-        "success": True,
-        "message": "Dry-run validation complete.",
-        "results": results
-    }
+        failed_item = next((item for item in results if item.get("status") == "FAILED"), None)
+        success = failed_item is None
 
-    if json_mode:
-        print(json.dumps(res))
-    else:
-        rprint("[bold green]✓ Migration Dry-Run Validation Result:[/bold green]")
-        for item in results:
-            status_color = "green" if "VALIDATED" in item["status"] else "yellow"
-            rprint(f"  - [{status_color}]{item['version']}_{item['name']}[/{status_color}]: {item['status']}")
+        res = {
+            "success": success,
+            "message": "Dry-run validation complete." if success else f"Dry-run validation failed: {failed_item.get('error')}",
+            "error": failed_item.get("error") if failed_item else None,
+            "results": results
+        }
+
+        if json_mode:
+            print(json.dumps(res))
+        else:
+            if success:
+                rprint("[bold green]✓ Migration Dry-Run Validation Result:[/bold green]")
+                for item in results:
+                    status_color = "green" if "VALIDATED" in item["status"] else "yellow"
+                    rprint(f"  - [{status_color}]{item['version']}_{item['name']}[/{status_color}]: {item['status']}")
+            else:
+                rprint(f"[bold red]✗ Migration Dry-Run Validation Failed:[/bold red] {failed_item.get('error')}")
+                raise typer.Exit(code=1)
+    except Exception as e:
+        if json_mode:
+            print(json.dumps({"success": False, "error": str(e), "message": f"Dry-Run Validation Failed: {str(e)}"}))
+            raise typer.Exit(code=0)
+        else:
+            rprint(f"[bold red]✗ Dry-Run Validation Failed:[/bold red] {str(e)}")
+            raise typer.Exit(code=1)
 
 @app.command()
 def apply(
@@ -289,24 +512,32 @@ def apply(
     cfg_data = cfg_mgr.load_config()
     migrations_dir = Path.cwd() / cfg_data["migrations_dir"]
 
-    executor = MigrationExecutor(db_url, cfg_data["tracking_schema"], cfg_data["tracking_table"])
-    executed = executor.apply_pending_migrations(migrations_dir)
+    try:
+        executor = MigrationExecutor(db_url, cfg_data["tracking_schema"], cfg_data["tracking_table"])
+        executed = executor.apply_pending_migrations(migrations_dir)
 
-    res = {
-        "success": True,
-        "message": f"Applied {len(executed)} migrations.",
-        "executed_migrations": executed
-    }
+        res = {
+            "success": True,
+            "message": f"Applied {len(executed)} migrations.",
+            "executed_migrations": executed
+        }
 
-    if json_mode:
-        print(json.dumps(res))
-    else:
-        if not executed:
-            rprint("[bold yellow]No pending migrations to apply. Database is up-to-date.[/bold yellow]")
+        if json_mode:
+            print(json.dumps(res))
         else:
-            rprint(f"[bold green]✓ Successfully applied {len(executed)} migrations:[/bold green]")
-            for item in executed:
-                rprint(f"  - [cyan]{item['version']}_{item['name']}[/cyan] ({item['execution_time_ms']} ms)")
+            if not executed:
+                rprint("[bold yellow]No pending migrations to apply. Database is up-to-date.[/bold yellow]")
+            else:
+                rprint(f"[bold green]✓ Successfully applied {len(executed)} migrations:[/bold green]")
+                for item in executed:
+                    rprint(f"  - [cyan]{item['version']}_{item['name']}[/cyan] ({item['execution_time_ms']} ms)")
+    except Exception as e:
+        if json_mode:
+            print(json.dumps({"success": False, "error": str(e), "message": f"Apply migrations failed: {str(e)}"}))
+            raise typer.Exit(code=0)
+        else:
+            rprint(f"[bold red]✗ Apply migrations failed:[/bold red] {str(e)}")
+            raise typer.Exit(code=1)
 
 @app.command()
 def status(

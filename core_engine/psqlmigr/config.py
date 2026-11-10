@@ -10,7 +10,8 @@ CONFIG_FILENAME = "psqlmigr.yaml"
 ENV_FILENAME = ".env"
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "schema_dir": "schema",
+    "version": "0.1.0",
+    "schema_dir": "schemas",
     "migrations_dir": "migrations",
     "tracking_schema": "psqlmigr",
     "tracking_table": "schema_migrations",

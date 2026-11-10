@@ -55,8 +55,13 @@ class DatabaseManager:
                         version VARCHAR(255) NOT NULL UNIQUE,
                         name VARCHAR(255) NOT NULL,
                         checksum VARCHAR(64) NOT NULL,
+                        project_version VARCHAR(50),
                         applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                         execution_time_ms INT
                     );
+                """).format(table_ident))
+                # Ensure project_version column exists for existing tracking tables
+                cur.execute(sql.SQL("""
+                    ALTER TABLE {} ADD COLUMN IF NOT EXISTS project_version VARCHAR(50);
                 """).format(table_ident))
             conn.commit()

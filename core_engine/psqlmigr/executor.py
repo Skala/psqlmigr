@@ -62,12 +62,12 @@ class MigrationExecutor:
                     
                     # Record migration in tracking table
                     insert_stmt = sql.SQL("""
-                        INSERT INTO {} (version, name, checksum, execution_time_ms)
-                        VALUES (%s, %s, %s, %s);
+                        INSERT INTO {} (version, name, checksum, project_version, execution_time_ms)
+                        VALUES (%s, %s, %s, %s, %s);
                     """).format(table_ident)
 
                     elapsed_ms = int((time.time() - start_time) * 1000)
-                    cur.execute(insert_stmt, (version, item["name"], item["up_checksum"], elapsed_ms))
+                    cur.execute(insert_stmt, (version, item["name"], item["up_checksum"], item.get("project_version", ""), elapsed_ms))
                 conn.commit()
 
             executed.append({
@@ -93,22 +93,36 @@ class MigrationExecutor:
                     for item in manifest:
                         version = item["version"]
                         if version in applied:
-                            results.append({"version": version, "name": item["name"], "status": "ALREADY_APPLIED"})
+                            results.append({"version": version, "name": item["name"], "status": "ALREADY_APPLIED", "error": None})
                             continue
 
                         up_file = migrations_dir / item["up_file"]
+                        if not up_file.exists():
+                            results.append({"version": version, "name": item["name"], "status": "FAILED", "error": f"File not found: {up_file}"})
+                            break
+
                         sql_content = up_file.read_text(encoding="utf-8")
                         
                         start_time = time.time()
-                        cur.execute(sql_content)
-                        elapsed_ms = int((time.time() - start_time) * 1000)
-
-                        results.append({
-                            "version": version,
-                            "name": item["name"],
-                            "execution_time_ms": elapsed_ms,
-                            "status": "VALIDATED_DRY_RUN"
-                        })
+                        try:
+                            cur.execute(sql_content)
+                            elapsed_ms = int((time.time() - start_time) * 1000)
+                            results.append({
+                                "version": version,
+                                "name": item["name"],
+                                "execution_time_ms": elapsed_ms,
+                                "status": "VALIDATED_DRY_RUN",
+                                "error": None
+                            })
+                        except Exception as e:
+                            results.append({
+                                "version": version,
+                                "name": item["name"],
+                                "execution_time_ms": 0,
+                                "status": "FAILED",
+                                "error": str(e)
+                            })
+                            break
                 finally:
                     conn.rollback() # Always rollback dry-run executions!
 

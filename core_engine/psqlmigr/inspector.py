@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List, Any, Optional
 import psycopg
 
@@ -62,9 +63,61 @@ class PostgresInspector:
                     })
         return tables
 
+    @staticmethod
+    def _build_identity_clause(
+        dtype: str,
+        identity_gen: Optional[str],
+        id_inc: Optional[Any] = None,
+        id_start: Optional[Any] = None,
+        id_min: Optional[Any] = None,
+        id_max: Optional[Any] = None,
+        id_cycle: Optional[str] = None,
+    ) -> Optional[str]:
+        if not identity_gen:
+            return None
+
+        base = f"GENERATED {identity_gen.upper()} AS IDENTITY"
+        default_max_map = {
+            "smallint": "32767",
+            "integer": "2147483647",
+            "bigint": "9223372036854775807",
+        }
+        expected_max = default_max_map.get((dtype or "").lower())
+
+        opts: List[str] = []
+        if id_inc is not None and str(id_inc) != "1":
+            opts.append(f"INCREMENT {id_inc}")
+        if id_start is not None and str(id_start) != "1":
+            opts.append(f"START {id_start}")
+        if id_min is not None and str(id_min) != "1":
+            opts.append(f"MINVALUE {id_min}")
+        if id_max is not None and expected_max and str(id_max) != expected_max:
+            opts.append(f"MAXVALUE {id_max}")
+        if id_cycle and str(id_cycle).upper() == "YES":
+            opts.append("CYCLE")
+
+        if opts:
+            return f"{base} ( {' '.join(opts)} )"
+        return base
+
     def _get_table_columns(self, cur, schema_name: str, table_name: str) -> List[Dict[str, Any]]:
         query = """
-            SELECT column_name, data_type, udt_name, is_nullable, column_default, character_maximum_length
+            SELECT
+                column_name,
+                data_type,
+                udt_name,
+                is_nullable,
+                column_default,
+                character_maximum_length,
+                numeric_precision,
+                numeric_scale,
+                is_identity,
+                identity_generation,
+                identity_increment,
+                identity_start,
+                identity_minimum,
+                identity_maximum,
+                identity_cycle
             FROM information_schema.columns
             WHERE table_schema = %s AND table_name = %s
             ORDER BY ordinal_position;
@@ -72,15 +125,48 @@ class PostgresInspector:
         cur.execute(query, (schema_name, table_name))
         cols = []
         for row in cur.fetchall():
-            cname, dtype, udt_name, is_null, cdef, char_len = row
-            full_type = udt_name.upper() if dtype == 'USER-DEFINED' else (
-                f"{dtype.upper()}({char_len})" if char_len and dtype in ('character varying', 'character') else dtype.upper()
-            )
+            (
+                cname,
+                dtype,
+                udt_name,
+                is_null,
+                cdef,
+                char_len,
+                num_prec,
+                num_scale,
+                is_identity,
+                identity_gen,
+                id_inc,
+                id_start,
+                id_min,
+                id_max,
+                id_cycle,
+            ) = row
+
+            if dtype == 'USER-DEFINED':
+                full_type = udt_name.upper()
+            elif char_len and dtype in ('character varying', 'character'):
+                full_type = f"{dtype.upper()}({char_len})"
+            elif dtype == 'numeric' and num_prec is not None:
+                if num_scale is not None:
+                    full_type = f"NUMERIC({num_prec},{num_scale})"
+                else:
+                    full_type = f"NUMERIC({num_prec})"
+            else:
+                full_type = dtype.upper()
+
+            identity_clause = None
+            if is_identity == 'YES' and identity_gen:
+                identity_clause = self._build_identity_clause(
+                    dtype, identity_gen, id_inc, id_start, id_min, id_max, id_cycle
+                )
+
             cols.append({
                 "name": cname,
                 "type": full_type,
                 "nullable": is_null == 'YES',
-                "default": cdef
+                "default": cdef,
+                "identity": identity_clause
             })
         return cols
 
@@ -138,6 +224,7 @@ class PostgresInspector:
             JOIN information_schema.key_column_usage kcu
               ON tc.constraint_name = kcu.constraint_name
              AND tc.table_schema = kcu.table_schema
+             AND tc.table_name = kcu.table_name
             WHERE tc.constraint_type = 'UNIQUE'
               AND tc.table_schema = %s
               AND tc.table_name = %s;
@@ -162,7 +249,7 @@ class PostgresInspector:
                 for name, vdef in cur.fetchall():
                     views.append({
                         "name": name,
-                        "definition": vdef.strip()
+                        "definition": (vdef or "").strip()
                     })
         return views
 
@@ -187,11 +274,28 @@ class PostgresInspector:
                 for name, fdef, lang, kind in cur.fetchall():
                     routines.append({
                         "name": name,
-                        "definition": fdef.strip(),
+                        "definition": (fdef or "").strip(),
                         "language": lang,
                         "kind": kind
                     })
         return routines
+
+    @staticmethod
+    def _ensure_index_if_not_exists(index_def: str) -> str:
+        cleaned = (index_def or "").strip()
+        cleaned = re.sub(
+            r"^CREATE\s+UNIQUE\s+INDEX\s+(?!IF\s+NOT\s+EXISTS\b)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(
+            r"^CREATE\s+INDEX\s+(?!IF\s+NOT\s+EXISTS\b)",
+            "CREATE INDEX IF NOT EXISTS ",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        return cleaned
 
     def inspect_indexes(self, schema_name: str) -> List[Dict[str, Any]]:
         query = """
@@ -205,7 +309,7 @@ class PostgresInspector:
             JOIN pg_namespace n ON n.oid = t.relnamespace
             WHERE n.nspname = %s
               AND t.relkind IN ('r', 'p', 'm')
-              AND NOT idx.indisprimary
+              AND NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = idx.indexrelid)
             ORDER BY i.relname;
         """
         indexes = []
@@ -216,6 +320,34 @@ class PostgresInspector:
                     indexes.append({
                         "name": iname,
                         "table_name": tname,
-                        "definition": idef.strip()
+                        "definition": self._ensure_index_if_not_exists(idef)
                     })
         return indexes
+
+    def inspect_sequences(self, schema_name: str) -> List[Dict[str, Any]]:
+        query = """
+            SELECT c.relname AS sequence_name
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = %s
+              AND c.relkind = 'S'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_depend d
+                  JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+                  WHERE d.classid = 'pg_class'::regclass
+                    AND d.objid = c.oid
+                    AND d.deptype = 'i'
+                    AND a.attidentity IN ('a', 'd')
+              )
+            ORDER BY c.relname;
+        """
+        sequences = []
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (schema_name,))
+                for seq_name, in cur.fetchall():
+                    sequences.append({
+                        "name": seq_name
+                    })
+        return sequences

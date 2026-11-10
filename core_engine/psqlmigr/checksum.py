@@ -2,6 +2,16 @@ import hashlib
 from pathlib import Path
 from typing import Dict, List, Tuple, Any
 
+def parse_version_and_name(version_name: str) -> Tuple[str, str, str]:
+    parts = version_name.split("_")
+    if len(parts) >= 3 and parts[0].startswith("v") and parts[1].isdigit():
+        version = f"{parts[0]}_{parts[1]}"
+        project_ver = parts[0].lstrip("v")
+        name = "_".join(parts[2:])
+        return version, name or version_name, project_ver
+    version, _, name = version_name.partition("_")
+    return version, name or version_name, ""
+
 class ChecksumManager:
     @staticmethod
     def calculate_file_checksum(file_path: Path) -> str:
@@ -35,10 +45,11 @@ class ChecksumManager:
             for file_path in sorted(up_dir.glob("*.sql")):
                 filename = file_path.name
                 version_name = filename[:-4] if filename.endswith(".sql") else filename
-                version, _, name = version_name.partition("_")
+                version, name, proj_ver = parse_version_and_name(version_name)
                 entry = migrations_by_version.setdefault(version, {
                     "version": version,
-                    "name": name or version_name,
+                    "name": name,
+                    "project_version": proj_ver,
                     "up_file": file_path,
                     "down_file": None,
                     "up_checksum": "",
@@ -53,10 +64,11 @@ class ChecksumManager:
             for file_path in sorted(down_dir.glob("*.sql")):
                 filename = file_path.name
                 version_name = filename[:-4] if filename.endswith(".sql") else filename
-                version, _, name = version_name.partition("_")
+                version, name, proj_ver = parse_version_and_name(version_name)
                 entry = migrations_by_version.setdefault(version, {
                     "version": version,
-                    "name": name or version_name,
+                    "name": name,
+                    "project_version": proj_ver,
                     "up_file": None,
                     "down_file": file_path,
                     "up_checksum": "",
@@ -70,10 +82,11 @@ class ChecksumManager:
             filename = file_path.name
             if filename.endswith(".up.sql"):
                 version_name = filename[:-7]
-                version, _, name = version_name.partition("_")
+                version, name, proj_ver = parse_version_and_name(version_name)
                 entry = migrations_by_version.setdefault(version, {
                     "version": version,
-                    "name": name or version_name,
+                    "name": name,
+                    "project_version": proj_ver,
                     "up_file": file_path,
                     "down_file": None,
                     "up_checksum": "",
@@ -85,10 +98,11 @@ class ChecksumManager:
 
             elif filename.endswith(".down.sql"):
                 version_name = filename[:-9]
-                version, _, name = version_name.partition("_")
+                version, name, proj_ver = parse_version_and_name(version_name)
                 entry = migrations_by_version.setdefault(version, {
                     "version": version,
-                    "name": name or version_name,
+                    "name": name,
+                    "project_version": proj_ver,
                     "up_file": None,
                     "down_file": file_path,
                     "up_checksum": "",
@@ -106,6 +120,7 @@ class ChecksumManager:
             result.append({
                 "version": item["version"],
                 "name": item["name"],
+                "project_version": item.get("project_version", ""),
                 "up_file": up_rel,
                 "down_file": down_rel,
                 "up_checksum": item["up_checksum"],

@@ -46,14 +46,14 @@ export class SchemaObjectsTreeProvider implements vscode.TreeDataProvider<Schema
     }
 
     getChildren(element?: SchemaItem): Thenable<SchemaItem[]> {
-        const schemaDirPath = path.join(this.workspaceRoot, 'schema');
+        const schemaDirPath = path.join(this.workspaceRoot, 'schemas');
 
         if (!fs.existsSync(schemaDirPath)) {
             return Promise.resolve([]);
         }
 
         if (!element) {
-            // Root level: List schemas (subdirectories of schema/)
+            // Root level: List schemas (subdirectories of schemas/)
             const entries = fs.readdirSync(schemaDirPath, { withFileTypes: true });
             const schemaFolders = entries
                 .filter(dirent => dirent.isDirectory())
@@ -72,7 +72,7 @@ export class SchemaObjectsTreeProvider implements vscode.TreeDataProvider<Schema
             const entries = fs.readdirSync(schemaFolderPath, { withFileTypes: true });
             const categories = entries
                 .filter(dirent => dirent.isDirectory())
-                .map(dirent => new SchemaItem(dirent.name, vscode.TreeItemCollapsibleState.Collapsed, 'category'));
+                .map(dirent => new SchemaItem(dirent.name, vscode.TreeItemCollapsibleState.Collapsed, 'category', vscode.Uri.file(path.join(schemaFolderPath, dirent.name))));
 
             return Promise.resolve(categories);
         }
@@ -81,7 +81,7 @@ export class SchemaObjectsTreeProvider implements vscode.TreeDataProvider<Schema
             // Under category folder: List .sql files
             const schemaName = element.label;
             // Get parent schema name from parent item path
-            const categoryFolderPath = this.findCategoryPath(schemaDirPath, element.label);
+            const categoryFolderPath = element.resourceUri ? element.resourceUri.fsPath : this.findCategoryPath(schemaDirPath, element.label);
             if (!categoryFolderPath || !fs.existsSync(categoryFolderPath)) {
                 return Promise.resolve([]);
             }

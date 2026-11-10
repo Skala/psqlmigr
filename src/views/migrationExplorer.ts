@@ -33,6 +33,24 @@ export class MigrationItem extends vscode.TreeItem {
     }
 }
 
+function parseVersionAndName(versionName: string): { version: string; name: string } {
+    const parts = versionName.split('_');
+    if (parts.length >= 3 && parts[0].startsWith('v') && /^\d+$/.test(parts[1])) {
+        return {
+            version: `${parts[0]}_${parts[1]}`,
+            name: parts.slice(2).join('_') || versionName
+        };
+    }
+    const idx = versionName.indexOf('_');
+    if (idx !== -1) {
+        return {
+            version: versionName.substring(0, idx),
+            name: versionName.substring(idx + 1) || versionName
+        };
+    }
+    return { version: versionName, name: versionName };
+}
+
 export class MigrationHistoryTreeProvider implements vscode.TreeDataProvider<MigrationItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<MigrationItem | undefined | null | void> = new vscode.EventEmitter<MigrationItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<MigrationItem | undefined | null | void> = this._onDidChangeTreeData.event;
@@ -40,7 +58,7 @@ export class MigrationHistoryTreeProvider implements vscode.TreeDataProvider<Mig
     constructor(
         private workspaceRoot: string,
         private cliRunner: PsqlMigrCliRunner
-    ) {}
+    ) { }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
@@ -80,8 +98,7 @@ export class MigrationHistoryTreeProvider implements vscode.TreeDataProvider<Mig
             const files = fs.readdirSync(upDir).filter(f => f.endsWith('.sql'));
             for (const file of files) {
                 const version_name = file.slice(0, -4);
-                const [version, ...nameParts] = version_name.split('_');
-                const name = nameParts.join('_') || version_name;
+                const { version, name } = parseVersionAndName(version_name);
                 const isApplied = appliedMap.has(version);
                 const upUri = vscode.Uri.file(path.join(upDir, file));
 
@@ -98,8 +115,7 @@ export class MigrationHistoryTreeProvider implements vscode.TreeDataProvider<Mig
         const legacyFiles = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.up.sql'));
         for (const file of legacyFiles) {
             const version_name = file.slice(0, -7);
-            const [version, ...nameParts] = version_name.split('_');
-            const name = nameParts.join('_') || version_name;
+            const { version, name } = parseVersionAndName(version_name);
             if (!items.some(i => i.version === version)) {
                 const isApplied = appliedMap.has(version);
                 const upUri = vscode.Uri.file(path.join(migrationsDir, file));

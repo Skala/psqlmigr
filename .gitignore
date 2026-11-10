@@ -3,6 +3,7 @@ node_modules/
 out/
 .vscode-test/
 *.vsix
+*.7z
 
 # Python artifacts
 __pycache__/

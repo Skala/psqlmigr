@@ -9,3 +9,17 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+.env
+psqlmigr.yaml
+schema/**
+schemas/**
+migrations/**
+core_engine/.venv/**
+core_engine/.pytest_cache/**
+core_engine/tests/**
+core_engine/**/*.egg-info/**
+**/__pycache__/**
+**/*.pyc
+*.vsix
+*.7z
+*.zip

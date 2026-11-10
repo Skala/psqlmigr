@@ -4,17 +4,15 @@
   "description": "Declarative PostgreSQL schema versioning, reverse-engineering, diffing, and migration management extension for VS Code & Antigravity.",
   "version": "0.1.1",
   "publisher": "psqlmigr",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Database",
+    "Data Science",
     "Other"
   ],
   "activationEvents": [
-    "onView:psqlmigr-schema",
-    "onView:psqlmigr-migrations",
-    "onView:psqlmigr-connection",
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
